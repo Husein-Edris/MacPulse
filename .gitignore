@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+dist/
+*.xcodeproj
+.DS_Store
+logs/
+.monitor.pid
