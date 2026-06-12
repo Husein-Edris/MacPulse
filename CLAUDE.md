@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MacPulse — a native SwiftUI menu bar app (macOS 13+) showing system health
 (with live CPU/RAM/disk readouts in the menu bar), a GitHub dashboard, a backup
-monitor, and rule-based improvement tips. Zero third-party dependencies; ~470 KB
+monitor, and rule-based improvement tips. Zero third-party dependencies; ~560 KB
 app bundle. The README covers features and user-facing docs; this file covers
 what will bite you when editing.
 

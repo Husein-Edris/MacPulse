@@ -1,6 +1,6 @@
 # MacPulse
 
-A native macOS menu bar app that keeps your machine's health and your GitHub presence one click away — with live CPU/memory/disk readouts right in the menu bar. Written in pure Swift/SwiftUI with **zero third-party dependencies** — the whole app weighs under 400 KB.
+A native macOS menu bar app that keeps your machine's health and your GitHub presence one click away — with live CPU/memory/disk readouts right in the menu bar. Written in pure Swift/SwiftUI with **zero third-party dependencies** — the whole app weighs under 600 KB.
 
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-brightgreen)
 ![Swift](https://img.shields.io/badge/Swift-5.8-orange)
@@ -62,7 +62,7 @@ make clean
 
 | Concern | Choice |
 |---|---|
-| Size | Single native binary, no bundled runtime — under 400 KB total vs. 100+ MB for an Electron equivalent |
+| Size | Single native binary, no bundled runtime — under 600 KB total vs. 100+ MB for an Electron equivalent |
 | Energy | Kernel reads are microseconds; timers carry tolerance so the OS can coalesce wakeups; the menu-bar sample backs off automatically on battery (every 12s vs. 5s on AC); the heavier process scan runs only while the popover is open; storage and large-file scans only run when you ask |
 | Security | Hardened-runtime code signing; no token is ever stored — GitHub fetches use an ephemeral session, optional sign-in borrows the `gh` CLI token in memory only, and private commit data is redacted before anything is cached |
 | Privacy | Unauthenticated by default, talking only to public github.com endpoints; sign-in is opt-in and nothing private is ever written to disk |
