@@ -14,6 +14,15 @@ struct GitHubEvent: Codable, Identifiable, Equatable {
     var date: Date?
 }
 
+struct GitHubCommit: Codable, Identifiable, Equatable {
+    var id: String      // sha (or synthesized)
+    var repo: String    // short name for display
+    var message: String
+    var isPrivate: Bool
+    var url: String
+    var date: Date?
+}
+
 /// Pure parsing logic, separated from networking so it is unit-testable.
 enum GitHubParser {
     // MARK: - Regex helper
@@ -149,5 +158,42 @@ enum GitHubParser {
             events.append(GitHubEvent(id: id, repo: repo, message: message, date: date))
         }
         return events
+    }
+
+    // MARK: - Authenticated events feed (PushEvents → commits)
+
+    /// Recent commits from the authenticated events feed (PushEvents only).
+    static func parseRecentCommits(data: Data, limit: Int = 10) -> [GitHubCommit] {
+        guard let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        let iso = ISO8601DateFormatter()
+        var commits: [GitHubCommit] = []
+        for item in array {
+            guard commits.count < limit else { break }
+            guard (item["type"] as? String) == "PushEvent",
+                  let repoDict = item["repo"] as? [String: Any],
+                  let repoFull = repoDict["name"] as? String,
+                  let payload = item["payload"] as? [String: Any],
+                  let pushed = payload["commits"] as? [[String: Any]],
+                  let last = pushed.last,
+                  let rawMsg = last["message"] as? String
+            else { continue }
+            let isPrivate = (item["public"] as? Bool) == false
+            let sha = last["sha"] as? String ?? UUID().uuidString
+            let repoShort = repoFull.components(separatedBy: "/").last ?? repoFull
+            let message = String(rawMsg.components(separatedBy: "\n")[0].prefix(72))
+            let date = (item["created_at"] as? String).flatMap { iso.date(from: $0) }
+            commits.append(GitHubCommit(
+                id: sha, repo: repoShort, message: message, isPrivate: isPrivate,
+                url: "https://github.com/\(repoFull)/commit/\(sha)", date: date))
+        }
+        return commits
+    }
+
+    // MARK: - Authenticated user payload
+
+    /// Authenticated /user payload's private repo count.
+    static func parsePrivateRepos(data: Data) -> Int? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return json["total_private_repos"] as? Int
     }
 }

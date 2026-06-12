@@ -116,6 +116,33 @@ do {
     expectEq(GitHubParser.parseEvents(data: json, limit: 5).count, 5, "event limit respected")
 }
 
+do {
+    // Authenticated events feed carries a top-level "public" flag and full repo name.
+    let json = Data("""
+    [
+      {"id":"1","type":"PushEvent","public":false,"repo":{"name":"me/secret-app"},
+       "payload":{"commits":[{"sha":"abc123","message":"feat: private work\\nbody"}]},
+       "created_at":"2026-06-12T08:00:00Z"},
+      {"id":"2","type":"PushEvent","public":true,"repo":{"name":"me/MacPulse"},
+       "payload":{"commits":[{"sha":"def456","message":"docs: readme"}]},
+       "created_at":"2026-06-11T08:00:00Z"},
+      {"id":"3","type":"WatchEvent","public":true,"repo":{"name":"me/other"},"payload":{}}
+    ]
+    """.utf8)
+    let commits = GitHubParser.parseRecentCommits(data: json, limit: 10)
+    expectEq(commits.count, 2, "only PushEvents become commits")
+    expectEq(commits[0].repo, "secret-app", "repo short name")
+    expect(commits[0].isPrivate, "private push flagged private")
+    expectEq(commits[0].message, "feat: private work", "first commit line only")
+    expectEq(commits[0].url, "https://github.com/me/secret-app/commit/abc123", "commit URL built")
+    expect(!commits[1].isPrivate, "public push not private")
+}
+do {
+    let json = Data(#"{"total_private_repos":7,"owned_private_repos":5}"#.utf8)
+    expectEq(GitHubParser.parsePrivateRepos(data: json), Optional(7), "reads total_private_repos")
+    expectEq(GitHubParser.parsePrivateRepos(data: Data("{}".utf8)), nil, "absent private repo count is nil")
+}
+
 // MARK: - BackupParser
 
 print("BackupParser")
