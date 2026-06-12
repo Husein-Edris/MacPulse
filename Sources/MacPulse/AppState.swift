@@ -49,7 +49,7 @@ final class AppState: ObservableObject {
         static let menuBarCPU = "showCPUInMenuBar"  // legacy key reused so the old preference carries over
         static let menuBarRAM = "menuBarRAM"
         static let menuBarDisk = "menuBarDisk"
-        static let githubCache = "githubSnapshotCache"
+        static let githubCache = "githubSnapshotCacheV2"
     }
 
     private let monitor = SystemMonitor()
@@ -194,10 +194,11 @@ final class AppState: ObservableObject {
         githubLoading = true
         githubError = nil
         Task {
+            let token = await Task.detached { GitHubAuth.token() }.value
             do {
-                let snapshot = try await githubService.fetch(user: user)
+                let snapshot = try await githubService.fetch(user: user, token: token)
                 self.github = snapshot
-                if let data = try? JSONEncoder().encode(snapshot) {
+                if let data = try? JSONEncoder().encode(snapshot.redactedForCache()) {
                     UserDefaults.standard.set(data, forKey: Keys.githubCache)
                 }
             } catch {
