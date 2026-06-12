@@ -176,12 +176,22 @@ do {
         0  9.9  9.9 kernel_task
     """
     let items = ProcessParser.parse(out)
-    expectEq(items.count, 2, "parses two valid rows, drops header/garbage/pid-0")
+    expectEq(items.count, 2, "parses two valid rows")
     expectEq(items[0].pid, 1234, "first pid parsed")
     expectEq(items[0].name, "Google Chrome Helper", "comm keeps internal spaces")
     expectEq(items[0].cpuPercent, 12.5, "cpu parsed")
     expectEq(items[1].name, "launchd", "second row name parsed")
     expectEq(items[1].memPercent, 0.1, "mem parsed")
+}
+
+do { // header row is always dropped
+    expectEq(ProcessParser.parse("  PID %CPU %MEM COMM\n  1 1.0 1.0 init").count, 1, "drops header, keeps one row")
+}
+
+do { // malformed rows are skipped for distinct reasons
+    expectEq(ProcessParser.parse("h\n  garbage line here").count, 0, "row with fewer than 4 columns skipped")
+    expectEq(ProcessParser.parse("h\n   0  9.9  9.9 kernel_task").count, 0, "pid 0 (kernel_task) skipped")
+    expectEq(ProcessParser.parse("h\n  x  1.0  1.0 name").count, 0, "non-numeric pid skipped")
 }
 
 // MARK: - ImprovementsEngine
