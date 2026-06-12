@@ -8,6 +8,7 @@ mkdir -p .build
 swiftc -O \
     Sources/MacPulse/GitHubParser.swift \
     Sources/MacPulse/ProcessParser.swift \
+    Sources/MacPulse/FileScanner.swift \
     Sources/MacPulse/BackupStatus.swift \
     Sources/MacPulse/ImprovementsEngine.swift \
     Sources/MacPulse/SecurityAudit.swift \

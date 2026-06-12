@@ -194,6 +194,26 @@ do { // malformed rows are skipped for distinct reasons
     expectEq(ProcessParser.parse("h\n  x  1.0  1.0 name").count, 0, "non-numeric pid skipped")
 }
 
+// MARK: - LargeFileRanker
+
+print("LargeFileRanker")
+
+do {
+    let files = [
+        LargeFile(path: "/a", sizeBytes: 50_000_000),
+        LargeFile(path: "/b", sizeBytes: 300_000_000),
+        LargeFile(path: "/c", sizeBytes: 150_000_000),
+    ]
+    let top = LargeFileRanker.top(files, minBytes: 100_000_000, limit: 10)
+    expectEq(top.count, 2, "drops files under the threshold")
+    expectEq(top[0].path, "/b", "biggest first")
+    expectEq(top[1].path, "/c", "second biggest next")
+}
+do {
+    let files = (0..<5).map { LargeFile(path: "/f\($0)", sizeBytes: Int64(200_000_000 + $0)) }
+    expectEq(LargeFileRanker.top(files, minBytes: 0, limit: 3).count, 3, "limit caps the result")
+}
+
 // MARK: - ImprovementsEngine
 
 print("ImprovementsEngine")
