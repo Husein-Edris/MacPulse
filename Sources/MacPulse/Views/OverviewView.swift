@@ -48,8 +48,8 @@ struct OverviewView: View {
             Divider()
 
             SectionHeader(title: "Top processes")
-            processRow(icon: "cpu", items: state.processes.topCPU, isCPU: true)
-            processRow(icon: "memorychip", items: state.processes.topRAM, isCPU: false)
+            processRow(icon: "cpu", items: Array(state.processes.topCPU.prefix(3)), isCPU: true)
+            processRow(icon: "memorychip", items: Array(state.processes.topRAM.prefix(3)), isCPU: false)
 
             DisclosureGroup(isExpanded: $showAllProcesses) {
                 Group {
