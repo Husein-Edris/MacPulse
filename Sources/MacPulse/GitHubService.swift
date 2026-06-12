@@ -65,13 +65,18 @@ final class GitHubService {
         async let userData = get("https://api.github.com/users/\(safeUser)", token: token)
         async let eventsData = get(eventsURL, token: token)
         async let contribHTML = get("https://github.com/users/\(safeUser)/contributions", token: nil)
-        async let selfData = token == nil
-            ? get("https://api.github.com/users/\(safeUser)", token: nil)
-            : get("https://api.github.com/user", token: token)
 
-        let (userInfo, events, html, selfInfo) = try await (userData, eventsData, contribHTML, selfData)
+        let (userInfo, events, html) = try await (userData, eventsData, contribHTML)
 
         guard let profile = GitHubParser.parseUser(data: userInfo) else { throw GitHubError.invalidUser }
+
+        // The private repo count comes only from the authenticated /user endpoint;
+        // skip the request entirely when unauthenticated (nothing private to read).
+        var privateRepos: Int? = nil
+        if let token {
+            let selfInfo = try await get("https://api.github.com/user", token: token)
+            privateRepos = GitHubParser.parsePrivateRepos(data: selfInfo)
+        }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"; formatter.timeZone = .current
@@ -89,7 +94,7 @@ final class GitHubService {
             events: GitHubParser.parseEvents(data: events),
             fetchedAt: Date(),
             recentCommits: GitHubParser.parseRecentCommits(data: events),
-            privateRepos: token == nil ? nil : GitHubParser.parsePrivateRepos(data: selfInfo),
+            privateRepos: privateRepos,
             authenticated: token != nil
         )
     }

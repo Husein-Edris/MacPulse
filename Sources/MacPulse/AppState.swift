@@ -146,6 +146,9 @@ final class AppState: ObservableObject {
     }
 
     /// Expensive `ps` process list — only runs while the popover is open.
+    /// Safe to overlap with `refreshSystem()`: `sampleProcesses()` only shells out
+    /// to `ps` and never touches `SystemMonitor.previousTicks`, so the non-concurrency-safe
+    /// CPU-tick state (guarded separately by `isSampling`) is not shared with this path.
     func refreshProcesses() {
         let monitor = self.monitor
         Task.detached(priority: .utility) {

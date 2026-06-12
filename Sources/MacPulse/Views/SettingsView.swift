@@ -63,7 +63,7 @@ struct SettingsView: View {
 
             SectionHeader(title: "About")
             VStack(alignment: .leading, spacing: 4) {
-                Text("MacPulse 1.0.0")
+                Text("MacPulse 1.1.0")
                     .font(.caption.weight(.semibold))
                 Text("System and GitHub dashboard for the menu bar. Native Swift, no third-party dependencies, all analysis on-device.")
                     .font(.caption2)
