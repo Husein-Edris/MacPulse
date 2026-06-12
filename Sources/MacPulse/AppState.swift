@@ -53,9 +53,12 @@ final class AppState: ObservableObject {
     private let githubService = GitHubService()
     private var systemTimer: Timer?
     private var githubTimer: Timer?
+    private var processTimer: Timer?
+    private var isPopoverOpen = false
+    private var onBattery = PowerSource.onBattery
+    private static let processInterval: TimeInterval = 5
     private var isApplyingLoginItem = false
 
-    private static let systemInterval: TimeInterval = 5
     private static let githubInterval: TimeInterval = 900       // 15 min
     private static let securityStaleAfter: TimeInterval = 1_800 // 30 min
 
@@ -76,6 +79,7 @@ final class AppState: ObservableObject {
 
         startTimers()
         refreshSystem()
+        refreshProcesses()
         refreshSecurity(force: true)
         refreshGitHub()
         refreshBackup()
@@ -97,22 +101,44 @@ final class AppState: ObservableObject {
         }
     }
 
-    func popoverOpened() {
+    func popoverDidOpen() {
+        isPopoverOpen = true
         refreshSystem()
+        refreshProcesses()
         refreshSecurity()
         refreshGitHub()
         refreshBackup()
+
+        processTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: Self.processInterval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.refreshProcesses() }
+        }
+        timer.tolerance = 1
+        processTimer = timer
     }
 
+    func popoverDidClose() {
+        isPopoverOpen = false
+        processTimer?.invalidate()
+        processTimer = nil
+    }
+
+    /// Cheap kernel sample only (CPU/RAM/disk) — drives the menu bar. No subprocess.
     func refreshSystem() {
         let monitor = self.monitor
         Task.detached(priority: .utility) {
             let snapshot = monitor.sample()
+            await MainActor.run { self.system = snapshot }
+        }
+    }
+
+    /// Expensive `ps` process list — only runs while the popover is open.
+    func refreshProcesses() {
+        let monitor = self.monitor
+        Task.detached(priority: .utility) {
             let procs = monitor.sampleProcesses()
-            await MainActor.run {
-                self.system = snapshot
-                self.processes = procs
-            }
+            await MainActor.run { self.processes = procs }
         }
     }
 
@@ -196,13 +222,7 @@ final class AppState: ObservableObject {
     private func startTimers() {
         systemTimer?.invalidate()
         githubTimer?.invalidate()
-
-        let sysTimer = Timer.scheduledTimer(withTimeInterval: Self.systemInterval, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in self.refreshSystem() }
-        }
-        sysTimer.tolerance = 2
-        systemTimer = sysTimer
+        scheduleSystemTimer()
 
         let ghTimer = Timer.scheduledTimer(withTimeInterval: Self.githubInterval, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -210,6 +230,26 @@ final class AppState: ObservableObject {
         }
         ghTimer.tolerance = 60
         githubTimer = ghTimer
+    }
+
+    /// (Re)schedules the menu-bar sample timer at the current battery cadence and,
+    /// on each tick, reschedules itself if the power source changed.
+    private func scheduleSystemTimer() {
+        systemTimer?.invalidate()
+        let interval = Fmt.sampleInterval(onBattery: onBattery)
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.refreshSystem()
+                let nowOnBattery = PowerSource.onBattery
+                if nowOnBattery != self.onBattery {
+                    self.onBattery = nowOnBattery
+                    self.scheduleSystemTimer()
+                }
+            }
+        }
+        timer.tolerance = 2
+        systemTimer = timer
     }
 
     private func applyLaunchAtLogin() {
