@@ -16,10 +16,14 @@ struct GitHubSnapshot: Codable {
 }
 
 extension GitHubSnapshot {
-    /// Cache-safe copy: private commit details never touch disk.
+    /// Cache-safe copy: private activity never touches disk. When authenticated,
+    /// both the recent-commits list and the raw events feed can carry private repo
+    /// names/messages, so both are dropped from the cached copy. Public (unauthenticated)
+    /// events are safe to cache so the UI has data on relaunch.
     func redactedForCache() -> GitHubSnapshot {
         var copy = self
         copy.recentCommits = []
+        if authenticated { copy.events = [] }
         return copy
     }
 }
