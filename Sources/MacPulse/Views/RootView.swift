@@ -44,7 +44,8 @@ struct RootView: View {
             footer
         }
         .frame(width: 380)
-        .onAppear { state.popoverOpened() }
+        .onAppear { state.popoverDidOpen() }
+        .onDisappear { state.popoverDidClose() }
     }
 
     private var header: some View {

@@ -77,6 +77,35 @@ struct TipsView: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
+
+            Group {
+                SectionHeader(title: "Large files")
+                Button(state.largeFilesScanning ? "Scanning…" : "Scan large files (≥100 MB)") {
+                    state.scanLargeFiles()
+                }
+                .disabled(state.largeFilesScanning)
+                .font(.caption)
+
+                if let files = state.largeFiles {
+                    if files.isEmpty {
+                        Text("No files ≥100 MB found in your home folder.")
+                            .font(.caption2).foregroundColor(.secondary)
+                    } else {
+                        ForEach(files) { f in
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(f.name).font(.caption).lineLimit(1)
+                                    Text(f.path).font(.caption2).foregroundColor(.secondary).lineLimit(1).truncationMode(.middle)
+                                }
+                                Spacer()
+                                Text(String(format: "%.0f MB", f.sizeMB)).font(.caption.monospacedDigit())
+                                Button("Reveal") { Opener.reveal(f.path) }.font(.caption2)
+                            }
+                            .padding(.vertical, 1)
+                        }
+                    }
+                }
+            }
         }
         .padding(12)
     }

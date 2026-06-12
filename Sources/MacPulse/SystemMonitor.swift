@@ -24,17 +24,6 @@ struct SystemSnapshot {
     var uptimeDays: Double { uptime / 86_400 }
 }
 
-struct ProcessItem: Identifiable {
-    let id = UUID()
-    let name: String
-    let cpuPercent: Double
-    let memPercent: Double
-}
-
-struct ProcessSnapshot {
-    let topCPU: [ProcessItem]
-    let topRAM: [ProcessItem]
-}
 
 /// Reads system metrics straight from the kernel (mach / sysctl) — no daemons,
 /// no log files, no polling subprocesses except one `ps` call for the process list.
@@ -72,18 +61,11 @@ final class SystemMonitor {
     }
 
     /// Blocking; one `ps` invocation, parsed and sorted in-process.
-    func sampleProcesses(top n: Int = 3) -> ProcessSnapshot {
-        guard let output = Shell.run("/bin/ps", ["-Aceo", "pcpu,pmem,comm", "-r"]) else {
+    func sampleProcesses(top n: Int = 10) -> ProcessSnapshot {
+        guard let output = Shell.run("/bin/ps", ["-Aceo", "pid,pcpu,pmem,comm", "-r"]) else {
             return ProcessSnapshot(topCPU: [], topRAM: [])
         }
-        var items: [ProcessItem] = []
-        for line in output.split(separator: "\n").dropFirst() {
-            let parts = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
-            guard parts.count == 3,
-                  let cpu = Double(parts[0]),
-                  let mem = Double(parts[1]) else { continue }
-            items.append(ProcessItem(name: String(parts[2]), cpuPercent: cpu, memPercent: mem))
-        }
+        let items = ProcessParser.parse(output)
         let byCPU = Array(items.prefix(n)) // ps -r is already CPU-sorted
         let byRAM = Array(items.sorted { $0.memPercent > $1.memPercent }.prefix(n))
         return ProcessSnapshot(topCPU: byCPU, topRAM: byRAM)

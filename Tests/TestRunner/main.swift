@@ -116,6 +116,33 @@ do {
     expectEq(GitHubParser.parseEvents(data: json, limit: 5).count, 5, "event limit respected")
 }
 
+do {
+    // Authenticated events feed carries a top-level "public" flag and full repo name.
+    let json = Data("""
+    [
+      {"id":"1","type":"PushEvent","public":false,"repo":{"name":"me/secret-app"},
+       "payload":{"commits":[{"sha":"abc123","message":"feat: private work\\nbody"}]},
+       "created_at":"2026-06-12T08:00:00Z"},
+      {"id":"2","type":"PushEvent","public":true,"repo":{"name":"me/MacPulse"},
+       "payload":{"commits":[{"sha":"def456","message":"docs: readme"}]},
+       "created_at":"2026-06-11T08:00:00Z"},
+      {"id":"3","type":"WatchEvent","public":true,"repo":{"name":"me/other"},"payload":{}}
+    ]
+    """.utf8)
+    let commits = GitHubParser.parseRecentCommits(data: json, limit: 10)
+    expectEq(commits.count, 2, "only PushEvents become commits")
+    expectEq(commits[0].repo, "secret-app", "repo short name")
+    expect(commits[0].isPrivate, "private push flagged private")
+    expectEq(commits[0].message, "feat: private work", "first commit line only")
+    expectEq(commits[0].url, "https://github.com/me/secret-app/commit/abc123", "commit URL built")
+    expect(!commits[1].isPrivate, "public push not private")
+}
+do {
+    let json = Data(#"{"total_private_repos":7,"owned_private_repos":5}"#.utf8)
+    expectEq(GitHubParser.parsePrivateRepos(data: json), Optional(7), "reads total_private_repos")
+    expectEq(GitHubParser.parsePrivateRepos(data: Data("{}".utf8)), nil, "absent private repo count is nil")
+}
+
 // MARK: - BackupParser
 
 print("BackupParser")
@@ -161,6 +188,57 @@ do {
     let partial = BackupParser.parse(Data(#"{"overall":"ok"}"#.utf8))
     expectEq(partial?.backups?.projects?.covered, nil, "missing nested fields stay nil")
     expect(BackupParser.isStale(partial!, now: Date()), "missing timestamp counts as stale")
+}
+
+// MARK: - ProcessParser
+
+print("ProcessParser")
+
+do {
+    let out = """
+      PID %CPU %MEM COMM
+     1234 12.5  3.2 Google Chrome Helper
+       42  0.0  0.1 launchd
+     garbage line here
+        0  9.9  9.9 kernel_task
+    """
+    let items = ProcessParser.parse(out)
+    expectEq(items.count, 2, "parses two valid rows")
+    expectEq(items[0].pid, 1234, "first pid parsed")
+    expectEq(items[0].name, "Google Chrome Helper", "comm keeps internal spaces")
+    expectEq(items[0].cpuPercent, 12.5, "cpu parsed")
+    expectEq(items[1].name, "launchd", "second row name parsed")
+    expectEq(items[1].memPercent, 0.1, "mem parsed")
+}
+
+do { // header row is always dropped
+    expectEq(ProcessParser.parse("  PID %CPU %MEM COMM\n  1 1.0 1.0 init").count, 1, "drops header, keeps one row")
+}
+
+do { // malformed rows are skipped for distinct reasons
+    expectEq(ProcessParser.parse("h\n  garbage line here").count, 0, "row with fewer than 4 columns skipped")
+    expectEq(ProcessParser.parse("h\n   0  9.9  9.9 kernel_task").count, 0, "pid 0 (kernel_task) skipped")
+    expectEq(ProcessParser.parse("h\n  x  1.0  1.0 name").count, 0, "non-numeric pid skipped")
+}
+
+// MARK: - LargeFileRanker
+
+print("LargeFileRanker")
+
+do {
+    let files = [
+        LargeFile(path: "/a", sizeBytes: 50_000_000),
+        LargeFile(path: "/b", sizeBytes: 300_000_000),
+        LargeFile(path: "/c", sizeBytes: 150_000_000),
+    ]
+    let top = LargeFileRanker.top(files, minBytes: 100_000_000, limit: 10)
+    expectEq(top.count, 2, "drops files under the threshold")
+    expectEq(top[0].path, "/b", "biggest first")
+    expectEq(top[1].path, "/c", "second biggest next")
+}
+do {
+    let files = (0..<5).map { LargeFile(path: "/f\($0)", sizeBytes: Int64(200_000_000 + $0)) }
+    expectEq(LargeFileRanker.top(files, minBytes: 0, limit: 3).count, 3, "limit caps the result")
 }
 
 // MARK: - ImprovementsEngine
@@ -240,6 +318,9 @@ print("Fmt")
 expectEq(Fmt.gb(UInt64(16 * 1_073_741_824)), "16.0", "bytes to GB")
 expectEq(Fmt.uptime(86_400 * 13 + 3_600 * 4), "13d 4h", "uptime days+hours")
 expectEq(Fmt.uptime(125 * 60), "2h 5m", "uptime hours+minutes")
+
+expectEq(Fmt.sampleInterval(onBattery: false), 5, "AC power samples every 5s")
+expectEq(Fmt.sampleInterval(onBattery: true), 12, "battery stretches the sample interval")
 
 expectEq(Fmt.menuBarMetrics(cpuPercent: 8, ramPercent: 61, diskPercent: 85,
                             showCPU: true, showRAM: true, showDisk: true),

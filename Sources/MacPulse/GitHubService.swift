@@ -10,6 +10,22 @@ struct GitHubSnapshot: Codable {
     var followers: Int
     var events: [GitHubEvent]
     var fetchedAt: Date
+    var recentCommits: [GitHubCommit]
+    var privateRepos: Int?
+    var authenticated: Bool
+}
+
+extension GitHubSnapshot {
+    /// Cache-safe copy: private activity never touches disk. When authenticated,
+    /// both the recent-commits list and the raw events feed can carry private repo
+    /// names/messages, so both are dropped from the cached copy. Public (unauthenticated)
+    /// events are safe to cache so the UI has data on relaunch.
+    func redactedForCache() -> GitHubSnapshot {
+        var copy = self
+        copy.recentCommits = []
+        if authenticated { copy.events = [] }
+        return copy
+    }
 }
 
 enum GitHubError: LocalizedError {
@@ -40,28 +56,32 @@ final class GitHubService {
         session = URLSession(configuration: config)
     }
 
-    func fetch(user: String) async throws -> GitHubSnapshot {
+    func fetch(user: String, token: String?) async throws -> GitHubSnapshot {
         let safeUser = user.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? user
+        let eventsURL = token == nil
+            ? "https://api.github.com/users/\(safeUser)/events/public?per_page=30"
+            : "https://api.github.com/users/\(safeUser)/events?per_page=30"
 
-        async let userData = get("https://api.github.com/users/\(safeUser)")
-        async let eventsData = get("https://api.github.com/users/\(safeUser)/events/public?per_page=30")
-        async let contribHTML = get("https://github.com/users/\(safeUser)/contributions")
+        async let userData = get("https://api.github.com/users/\(safeUser)", token: token)
+        async let eventsData = get(eventsURL, token: token)
+        async let contribHTML = get("https://github.com/users/\(safeUser)/contributions", token: nil)
 
         let (userInfo, events, html) = try await (userData, eventsData, contribHTML)
 
-        guard let profile = GitHubParser.parseUser(data: userInfo) else {
-            throw GitHubError.invalidUser
+        guard let profile = GitHubParser.parseUser(data: userInfo) else { throw GitHubError.invalidUser }
+
+        // The private repo count comes only from the authenticated /user endpoint;
+        // skip the request entirely when unauthenticated (nothing private to read).
+        var privateRepos: Int? = nil
+        if let token {
+            let selfInfo = try await get("https://api.github.com/user", token: token)
+            privateRepos = GitHubParser.parsePrivateRepos(data: selfInfo)
         }
 
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"; formatter.timeZone = .current
         let todayISO = formatter.string(from: Date())
-
-        let stats = GitHubParser.parseContributions(
-            html: String(data: html, encoding: .utf8) ?? "",
-            todayISO: todayISO
-        )
+        let stats = GitHubParser.parseContributions(html: String(data: html, encoding: .utf8) ?? "", todayISO: todayISO)
 
         return GitHubSnapshot(
             user: user,
@@ -72,13 +92,18 @@ final class GitHubService {
             publicRepos: profile.repos,
             followers: profile.followers,
             events: GitHubParser.parseEvents(data: events),
-            fetchedAt: Date()
+            fetchedAt: Date(),
+            recentCommits: GitHubParser.parseRecentCommits(data: events),
+            privateRepos: privateRepos,
+            authenticated: token != nil
         )
     }
 
-    private func get(_ urlString: String) async throws -> Data {
+    private func get(_ urlString: String, token: String?) async throws -> Data {
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             throw GitHubError.badStatus(http.statusCode)
         }

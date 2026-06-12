@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MacPulse — a native SwiftUI menu bar app (macOS 13+) showing system health
 (with live CPU/RAM/disk readouts in the menu bar), a GitHub dashboard, a backup
-monitor, and rule-based improvement tips. Zero third-party dependencies; ~470 KB
+monitor, and rule-based improvement tips. Zero third-party dependencies; ~560 KB
 app bundle. The README covers features and user-facing docs; this file covers
 what will bite you when editing.
 
@@ -30,8 +30,10 @@ that runs in a few seconds. To iterate on one area, comment out other sections l
   (`scripts/bundle.sh`, `scripts/test.sh`). `Package.swift` exists only for machines
   with full Xcode.
 - Tests use a homegrown assert runner (`expect`/`expectEq` in `Tests/TestRunner/main.swift`),
-  not XCTest. `scripts/test.sh` compiles ONLY the pure-logic sources — if you add a new
-  logic file that tests reference, add it to the file list in `scripts/test.sh`.
+  not XCTest. `scripts/test.sh` compiles ONLY the pure-logic sources (currently
+  `GitHubParser`, `ProcessParser`, `FileScanner`, `BackupStatus`, `ImprovementsEngine`,
+  `SecurityAudit`, `Shell`, `Formatters`) — if you add a new logic file that tests
+  reference, add it to the file list in `scripts/test.sh`.
 - Swift is 5.8 / SDK 13.3: no `@Observable` macro (use `ObservableObject`), no bare
   `/regex/` literals (code uses `NSRegularExpression`), ViewBuilder still caps at
   10 children (wrap in `Group` — this has already broken the build once).
@@ -44,27 +46,55 @@ publishes → SwiftUI views render. Views never call services directly.
 - **Pure logic vs I/O is a hard boundary.** `GitHubParser`, `ImprovementsEngine`, and
   the `Fmt` helpers are pure functions with no networking/filesystem — that's what
   makes them testable without XCTest. Keep new logic on the pure side and inject data.
-- **`AppState` owns all timers and caching policy**: system sample every 5s
-  (tolerance 2s), GitHub every 15 min (cached in UserDefaults so the UI has data on
-  relaunch), security audit every 30 min, storage scan only on user demand.
-  Blocking work runs in `Task.detached`, results assigned back on `@MainActor`.
+- **`AppState` owns all timers and caching policy**: the cheap kernel sample
+  (`refreshSystem()`, CPU/RAM/disk for the menu bar) is **battery-aware** —
+  `Fmt.sampleInterval(onBattery:)` returns 5s on AC, 12s on battery, and
+  `scheduleSystemTimer()` self-reschedules when the power source flips. The expensive
+  `ps` process scan is **popover-gated**: `RootView` `.onAppear`/`.onDisappear` call
+  `AppState.popoverDidOpen/Close`, which start/stop a separate `processTimer`, so it
+  only runs while the popover is open. GitHub refreshes every 15 min (cached in
+  UserDefaults so the UI has data on relaunch), security audit every 30 min, storage
+  and large-file scans only on user demand. Blocking work runs in `Task.detached`,
+  results assigned back on `@MainActor`.
 - **`SystemMonitor` reads the kernel directly** (`host_statistics`, `vm_statistics64`,
   `sysctl`) — RAM uses Activity Monitor's formula (internal − purgeable + wired +
   compressed), disk uses `volumeAvailableCapacityForImportantUsage` to match Finder.
   Don't replace these with `df`/`top` parsing; values would stop matching macOS UI.
+  `PowerSource` (IOKit) supplies the AC-vs-battery flag that drives the sample interval.
 - **CPU % needs two tick samples** — `SystemMonitor` keeps `previousTicks` state and
-  double-samples on first call. It is NOT safe to call `sample()` concurrently.
-- **GitHub data is unauthenticated by design** (security: nothing to leak). The
+  double-samples on first call. It is NOT safe to call `sample()` concurrently, so
+  `refreshSystem()` is guarded by an `isSampling` flag to prevent overlapping runs.
+- **Process control is pure-parse + syscall.** `ProcessParser` (pure, tested) parses
+  `ps -Aceo pid,pcpu,pmem,comm -r` into `ProcessItem`s (now carrying `pid`).
+  `ProcessControl.terminate(pid:force:)` calls the `kill(2)` syscall directly
+  (SIGTERM, or SIGKILL when forced) and maps `EPERM` → a friendly `notPermitted`
+  failure — root-owned processes fail gracefully, never escalating to sudo.
+- **Large-file scan is I/O walk + pure ranker.** `FileScanner.scanLargeFiles` walks the
+  home folder (skipping `~/Library`, hidden dirs, and symlinks) for files ≥100 MB;
+  the pure, tested `LargeFileRanker` sorts and caps the results. Keep the ranking logic
+  on the pure side.
+- **GitHub data is unauthenticated by default** (security: nothing to leak). The
   contributions total relies on a tooltip-sum fallback because GitHub's HTML fragment
   no longer ships the "N contributions in the last year" headline. If GitHub changes
   the `data-date`/`data-level` markup, `GitHubParser.parseContributions` is the only
   place to fix.
+- **Optional auth borrows the `gh` CLI token in memory only.** `GitHubAuth` shells out
+  to `gh auth token`; the token is never written to disk. When signed in, MacPulse hits
+  the authenticated events feed (private + public) for the Recent Commits list and
+  private repo count. **Security boundary:** private commit details and the authenticated
+  events feed are stripped via `redactedForCache()` before the snapshot is persisted —
+  only public-safe aggregates reach UserDefaults. The cache key is `githubSnapshotCacheV2`
+  (bumped from v1 so older caches with no redaction are discarded). Everything still works
+  fully unauthenticated if `gh` isn't logged in.
 - **Backups tab reads a local file, not the network.** `BackupService.load()` reads
   `~/Projects/backup-automation/web/data/status.json` (the same JSON that repo's
   `collect-status.sh` writes and its web dashboard renders); decoding + staleness live in
   the pure, tested `BackupParser`/`BackupStatus`. The public dashboard URL is login-gated and
   serves the raw JSON as 403, so the local file is the correct source. All `BackupStatus`
   fields are optional so a partial/older status.json still decodes; unknown keys are ignored.
+  `BackupLocations` resolves the Google Drive `projects-backup`/`claude-backups` folders
+  (via a CloudStorage glob — no hardcoded email), the SSD, and the launchd log paths so the
+  Backups tab can reveal them in Finder (buttons disabled when a destination isn't mounted).
 - **Menu-bar readout** is `MenuBarLabel` in `MacPulseApp.swift`. `Fmt.menuBarMetrics(...)`
   (pure, tested) decides which `MenuMetric`s show; `MenuBarRenderer.image(...)` draws them
   Stats-style — a small label stacked above each value — as a **template** `NSImage` so the

@@ -48,6 +48,15 @@ struct BackupView: View {
                     StatTile(value: sizeText(pj?.sizeToday), label: "size today")
                     StatTile(value: "\(pj?.dbDumpsToday ?? 0)", label: "db dumps")
                 }
+                HStack(spacing: 8) {
+                    StatTile(value: "\(pj?.archived ?? 0)", label: "archived today")
+                    StatTile(value: "\(cl?.driveCopies ?? 0)", label: "claude copies")
+                    StatTile(value: (pj?.ranToday == true) ? "yes" : "no", label: "ran today",
+                             accent: (pj?.ranToday == true) ? .green : .orange)
+                }
+                if let detail = b.drill?.detail, !detail.isEmpty {
+                    Text("Restore drill: \(detail)").font(.caption2).foregroundColor(.secondary)
+                }
             }
 
             Divider()
@@ -58,6 +67,19 @@ struct BackupView: View {
                 kv("SSD (full)", (b.disk?.ssdMounted == true)
                     ? "\(b.disk?.ssdFree ?? "—") free" : "not plugged in")
                 kv("Mac free", b.disk?.macFree ?? "—")
+            }
+
+            Divider()
+            Group {
+                SectionHeader(title: "Locations")
+                if let pj = BackupLocations.projectsBackup { revealRow(pj) }
+                if let cl = BackupLocations.claudeBackup { revealRow(cl) }
+                revealRow(BackupLocations.ssd)
+                HStack(spacing: 8) {
+                    Button("projects log") { Opener.reveal(BackupLocations.projectsLog.path) }.font(.caption2)
+                    Button("claude log") { Opener.reveal(BackupLocations.claudeLog.path) }.font(.caption2)
+                    Spacer()
+                }
             }
 
             Divider()
@@ -123,6 +145,16 @@ struct BackupView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private func revealRow(_ loc: BackupLocation) -> some View {
+        HStack {
+            Text(loc.label).font(.caption).foregroundColor(.secondary)
+            Spacer()
+            Button("Reveal") { Opener.reveal(loc.path) }
+                .font(.caption2)
+                .disabled(!loc.exists)
+        }
     }
 
     private func kv(_ label: String, _ value: String) -> some View {

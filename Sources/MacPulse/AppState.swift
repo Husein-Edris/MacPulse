@@ -12,8 +12,11 @@ final class AppState: ObservableObject {
     @Published var githubLoading = false
     @Published var hotspots: StorageHotspots?
     @Published var hotspotsScanning = false
+    @Published var largeFiles: [LargeFile]?
+    @Published var largeFilesScanning = false
     @Published var backup: BackupStatus?
     @Published var loginItemError: String?
+    @Published var processActionError: String?
 
     // MARK: - Settings
     @Published var githubUser: String {
@@ -46,16 +49,20 @@ final class AppState: ObservableObject {
         static let menuBarCPU = "showCPUInMenuBar"  // legacy key reused so the old preference carries over
         static let menuBarRAM = "menuBarRAM"
         static let menuBarDisk = "menuBarDisk"
-        static let githubCache = "githubSnapshotCache"
+        static let githubCache = "githubSnapshotCacheV2"
     }
 
     private let monitor = SystemMonitor()
     private let githubService = GitHubService()
     private var systemTimer: Timer?
     private var githubTimer: Timer?
+    private var processTimer: Timer?
+    private var isPopoverOpen = false
+    private var isSampling = false
+    private var onBattery = PowerSource.onBattery
+    private static let processInterval: TimeInterval = 5
     private var isApplyingLoginItem = false
 
-    private static let systemInterval: TimeInterval = 5
     private static let githubInterval: TimeInterval = 900       // 15 min
     private static let securityStaleAfter: TimeInterval = 1_800 // 30 min
 
@@ -76,6 +83,7 @@ final class AppState: ObservableObject {
 
         startTimers()
         refreshSystem()
+        refreshProcesses()
         refreshSecurity(force: true)
         refreshGitHub()
         refreshBackup()
@@ -85,6 +93,7 @@ final class AppState: ObservableObject {
 
     func refreshAll() {
         refreshSystem()
+        if isPopoverOpen { refreshProcesses() }
         refreshSecurity(force: true)
         refreshGitHub(force: true)
         refreshBackup()
@@ -97,22 +106,70 @@ final class AppState: ObservableObject {
         }
     }
 
-    func popoverOpened() {
+    func popoverDidOpen() {
+        isPopoverOpen = true
         refreshSystem()
+        refreshProcesses()
         refreshSecurity()
         refreshGitHub()
         refreshBackup()
+
+        processTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: Self.processInterval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.refreshProcesses() }
+        }
+        timer.tolerance = 1
+        processTimer = timer
     }
 
+    func popoverDidClose() {
+        isPopoverOpen = false
+        processTimer?.invalidate()
+        processTimer = nil
+    }
+
+    /// Cheap kernel sample only (CPU/RAM/disk) — drives the menu bar. No subprocess.
+    /// Guarded so overlapping calls (timer tick + popover open) never run the
+    /// non-concurrency-safe SystemMonitor.sample() simultaneously.
     func refreshSystem() {
+        guard !isSampling else { return }
+        isSampling = true
         let monitor = self.monitor
         Task.detached(priority: .utility) {
             let snapshot = monitor.sample()
-            let procs = monitor.sampleProcesses()
             await MainActor.run {
                 self.system = snapshot
-                self.processes = procs
+                self.isSampling = false
             }
+        }
+    }
+
+    /// Expensive `ps` process list — only runs while the popover is open.
+    /// Safe to overlap with `refreshSystem()`: `sampleProcesses()` only shells out
+    /// to `ps` and never touches `SystemMonitor.previousTicks`, so the non-concurrency-safe
+    /// CPU-tick state (guarded separately by `isSampling`) is not shared with this path.
+    func refreshProcesses() {
+        let monitor = self.monitor
+        Task.detached(priority: .utility) {
+            let procs = monitor.sampleProcesses()
+            await MainActor.run { self.processes = procs }
+        }
+    }
+
+    /// Ends a process and refreshes the list. Surfaces a friendly message on failure.
+    func endProcess(_ item: ProcessItem, force: Bool) {
+        switch ProcessControl.terminate(pid: item.pid, force: force) {
+        case .ok:
+            processActionError = nil
+            refreshProcesses()
+        case .notPermitted:
+            processActionError = "Couldn't end \(item.name) — it's owned by the system."
+        case .notFound:
+            processActionError = nil
+            refreshProcesses()
+        case .failed(let code):
+            processActionError = "Couldn't end \(item.name) (error \(code))."
         }
     }
 
@@ -140,10 +197,11 @@ final class AppState: ObservableObject {
         githubLoading = true
         githubError = nil
         Task {
+            let token = await Task.detached { GitHubAuth.token() }.value
             do {
-                let snapshot = try await githubService.fetch(user: user)
+                let snapshot = try await githubService.fetch(user: user, token: token)
                 self.github = snapshot
-                if let data = try? JSONEncoder().encode(snapshot) {
+                if let data = try? JSONEncoder().encode(snapshot.redactedForCache()) {
                     UserDefaults.standard.set(data, forKey: Keys.githubCache)
                 }
             } catch {
@@ -161,6 +219,18 @@ final class AppState: ObservableObject {
             await MainActor.run {
                 self.hotspots = result
                 self.hotspotsScanning = false
+            }
+        }
+    }
+
+    func scanLargeFiles() {
+        guard !largeFilesScanning else { return }
+        largeFilesScanning = true
+        Task.detached(priority: .utility) {
+            let result = FileScanner.scanLargeFiles()
+            await MainActor.run {
+                self.largeFiles = result
+                self.largeFilesScanning = false
             }
         }
     }
@@ -196,13 +266,7 @@ final class AppState: ObservableObject {
     private func startTimers() {
         systemTimer?.invalidate()
         githubTimer?.invalidate()
-
-        let sysTimer = Timer.scheduledTimer(withTimeInterval: Self.systemInterval, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in self.refreshSystem() }
-        }
-        sysTimer.tolerance = 2
-        systemTimer = sysTimer
+        scheduleSystemTimer()
 
         let ghTimer = Timer.scheduledTimer(withTimeInterval: Self.githubInterval, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -210,6 +274,26 @@ final class AppState: ObservableObject {
         }
         ghTimer.tolerance = 60
         githubTimer = ghTimer
+    }
+
+    /// (Re)schedules the menu-bar sample timer at the current battery cadence and,
+    /// on each tick, reschedules itself if the power source changed.
+    private func scheduleSystemTimer() {
+        systemTimer?.invalidate()
+        let interval = Fmt.sampleInterval(onBattery: onBattery)
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.refreshSystem()
+                let nowOnBattery = PowerSource.onBattery
+                if nowOnBattery != self.onBattery {
+                    self.onBattery = nowOnBattery
+                    self.scheduleSystemTimer()
+                }
+            }
+        }
+        timer.tolerance = 2
+        systemTimer = timer
     }
 
     private func applyLaunchAtLogin() {
