@@ -272,6 +272,9 @@ expectEq(Fmt.gb(UInt64(16 * 1_073_741_824)), "16.0", "bytes to GB")
 expectEq(Fmt.uptime(86_400 * 13 + 3_600 * 4), "13d 4h", "uptime days+hours")
 expectEq(Fmt.uptime(125 * 60), "2h 5m", "uptime hours+minutes")
 
+expectEq(Fmt.sampleInterval(onBattery: false), 5, "AC power samples every 5s")
+expectEq(Fmt.sampleInterval(onBattery: true), 12, "battery stretches the sample interval")
+
 expectEq(Fmt.menuBarMetrics(cpuPercent: 8, ramPercent: 61, diskPercent: 85,
                             showCPU: true, showRAM: true, showDisk: true),
          [MenuMetric(label: "CPU", value: "8%"), MenuMetric(label: "RAM", value: "61%"), MenuMetric(label: "SSD", value: "85%")],

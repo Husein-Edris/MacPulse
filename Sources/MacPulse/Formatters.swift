@@ -35,6 +35,11 @@ enum Fmt {
         return metrics
     }
 
+    /// Menu-bar sample cadence. Stretched on battery to cut idle wakeups.
+    static func sampleInterval(onBattery: Bool) -> TimeInterval {
+        onBattery ? 12 : 5
+    }
+
     static func ago(_ date: Date) -> String {
         let diff = Int(Date().timeIntervalSince(date))
         if diff < 60 { return "\(diff)s ago" }
