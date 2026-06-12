@@ -55,6 +55,7 @@ final class AppState: ObservableObject {
     private var githubTimer: Timer?
     private var processTimer: Timer?
     private var isPopoverOpen = false
+    private var isSampling = false
     private var onBattery = PowerSource.onBattery
     private static let processInterval: TimeInterval = 5
     private var isApplyingLoginItem = false
@@ -89,6 +90,7 @@ final class AppState: ObservableObject {
 
     func refreshAll() {
         refreshSystem()
+        if isPopoverOpen { refreshProcesses() }
         refreshSecurity(force: true)
         refreshGitHub(force: true)
         refreshBackup()
@@ -125,11 +127,18 @@ final class AppState: ObservableObject {
     }
 
     /// Cheap kernel sample only (CPU/RAM/disk) — drives the menu bar. No subprocess.
+    /// Guarded so overlapping calls (timer tick + popover open) never run the
+    /// non-concurrency-safe SystemMonitor.sample() simultaneously.
     func refreshSystem() {
+        guard !isSampling else { return }
+        isSampling = true
         let monitor = self.monitor
         Task.detached(priority: .utility) {
             let snapshot = monitor.sample()
-            await MainActor.run { self.system = snapshot }
+            await MainActor.run {
+                self.system = snapshot
+                self.isSampling = false
+            }
         }
     }
 
