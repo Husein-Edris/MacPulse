@@ -20,27 +20,29 @@ struct GitHubView: View {
             }
 
             if let gh = state.github {
-                HStack(spacing: 8) {
-                    StatTile(value: "\(gh.totalContributionsYear)", label: "contributions", accent: .green)
-                    StatTile(value: "\(gh.streakDays)d", label: "streak", accent: gh.streakDays > 0 ? .orange : .primary)
-                }
-                HStack(spacing: 8) {
-                    StatTile(value: "\(gh.publicRepos)", label: "public repos")
-                    StatTile(value: "\(gh.followers)", label: "followers")
-                }
+                Group {
+                    HStack(spacing: 8) {
+                        StatTile(value: "\(gh.totalContributionsYear)", label: "contributions", accent: .green)
+                        StatTile(value: "\(gh.streakDays)d", label: "streak", accent: gh.streakDays > 0 ? .orange : .primary)
+                    }
+                    HStack(spacing: 8) {
+                        StatTile(value: "\(gh.publicRepos)", label: "public repos")
+                        StatTile(value: "\(gh.followers)", label: "followers")
+                    }
 
-                HStack(spacing: 6) {
-                    Image(systemName: gh.activeToday ? "checkmark.circle.fill" : "circle")
-                        .foregroundColor(gh.activeToday ? .green : .secondary)
-                        .font(.caption)
-                    Text(gh.activeToday ? "Contributed today" : "No contributions yet today")
-                        .font(.caption)
-                    Spacer()
-                    Text("\(gh.activeDaysLast7)/7 days active this week")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 6) {
+                        Image(systemName: gh.activeToday ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(gh.activeToday ? .green : .secondary)
+                            .font(.caption)
+                        Text(gh.activeToday ? "Contributed today" : "No contributions yet today")
+                            .font(.caption)
+                        Spacer()
+                        Text("\(gh.activeDaysLast7)/7 days active this week")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
 
                 Divider()
 
@@ -71,6 +73,38 @@ struct GitHubView: View {
                                         .foregroundColor(.secondary)
                                 }
                             }
+                        }
+                    }
+                }
+
+                Group {
+                    HStack(spacing: 6) {
+                        Image(systemName: gh.authenticated ? "lock.fill" : "globe")
+                            .foregroundColor(gh.authenticated ? .green : .secondary)
+                        Text(gh.authenticated
+                             ? "Authenticated via gh • \(gh.privateRepos ?? 0) private repos"
+                             : "Public only")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+
+                    if !gh.recentCommits.isEmpty {
+                        SectionHeader(title: "Recent commits")
+                        ForEach(gh.recentCommits) { c in
+                            Button { Opener.open(c.url) } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: c.isPrivate ? "lock.fill" : "globe")
+                                        .font(.caption2)
+                                        .foregroundColor(c.isPrivate ? .orange : .secondary)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(c.message).font(.caption).lineLimit(1)
+                                        Text(c.repo).font(.caption2).foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    if let d = c.date { Text(Fmt.ago(d)).font(.caption2).foregroundColor(.secondary) }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.vertical, 1)
                         }
                     }
                 }

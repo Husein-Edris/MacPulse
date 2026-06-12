@@ -16,7 +16,12 @@ struct SettingsView: View {
                         .disabled(usernameDraft.trimmingCharacters(in: .whitespaces).isEmpty
                                   || usernameDraft == state.githubUser)
                 }
-                Text("Only public data is fetched — no token, nothing stored except a local cache.")
+                if let g = state.github {
+                    Text(g.authenticated ? "Signed in via gh CLI" : "Unauthenticated (public data only)")
+                        .font(.caption2)
+                        .foregroundColor(g.authenticated ? .green : .secondary)
+                }
+                Text("If the gh CLI is signed in, private repo data is also fetched. Your token stays in memory only — it is never stored.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
