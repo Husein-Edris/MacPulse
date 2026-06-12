@@ -97,4 +97,14 @@ enum Opener {
         guard let url = URL(string: string) else { return }
         NSWorkspace.shared.open(url)
     }
+
+    /// Opens Finder with the item selected. Falls back to opening the parent dir.
+    static func reveal(_ path: String) {
+        let url = URL(fileURLWithPath: path)
+        if FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            NSWorkspace.shared.open(url.deletingLastPathComponent())
+        }
+    }
 }

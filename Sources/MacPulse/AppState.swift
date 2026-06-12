@@ -12,6 +12,8 @@ final class AppState: ObservableObject {
     @Published var githubLoading = false
     @Published var hotspots: StorageHotspots?
     @Published var hotspotsScanning = false
+    @Published var largeFiles: [LargeFile]?
+    @Published var largeFilesScanning = false
     @Published var backup: BackupStatus?
     @Published var loginItemError: String?
     @Published var processActionError: String?
@@ -213,6 +215,18 @@ final class AppState: ObservableObject {
             await MainActor.run {
                 self.hotspots = result
                 self.hotspotsScanning = false
+            }
+        }
+    }
+
+    func scanLargeFiles() {
+        guard !largeFilesScanning else { return }
+        largeFilesScanning = true
+        Task.detached(priority: .utility) {
+            let result = FileScanner.scanLargeFiles()
+            await MainActor.run {
+                self.largeFiles = result
+                self.largeFilesScanning = false
             }
         }
     }
