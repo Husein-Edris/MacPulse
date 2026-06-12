@@ -14,6 +14,7 @@ final class AppState: ObservableObject {
     @Published var hotspotsScanning = false
     @Published var backup: BackupStatus?
     @Published var loginItemError: String?
+    @Published var processActionError: String?
 
     // MARK: - Settings
     @Published var githubUser: String {
@@ -148,6 +149,22 @@ final class AppState: ObservableObject {
         Task.detached(priority: .utility) {
             let procs = monitor.sampleProcesses()
             await MainActor.run { self.processes = procs }
+        }
+    }
+
+    /// Ends a process and refreshes the list. Surfaces a friendly message on failure.
+    func endProcess(_ item: ProcessItem, force: Bool) {
+        switch ProcessControl.terminate(pid: item.pid, force: force) {
+        case .ok:
+            processActionError = nil
+            refreshProcesses()
+        case .notPermitted:
+            processActionError = "Couldn't end \(item.name) — it's owned by the system."
+        case .notFound:
+            processActionError = nil
+            refreshProcesses()
+        case .failed(let code):
+            processActionError = "Couldn't end \(item.name) (error \(code))."
         }
     }
 

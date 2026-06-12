@@ -3,6 +3,11 @@ import SwiftUI
 struct OverviewView: View {
     @EnvironmentObject var state: AppState
 
+    @State private var showAllProcesses = false
+    @State private var sortByCPU = true
+    @State private var killTarget: ProcessItem?
+    @State private var forceKill = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let s = state.system {
@@ -45,6 +50,39 @@ struct OverviewView: View {
             SectionHeader(title: "Top processes")
             processRow(icon: "cpu", items: state.processes.topCPU, isCPU: true)
             processRow(icon: "memorychip", items: state.processes.topRAM, isCPU: false)
+
+            DisclosureGroup(isExpanded: $showAllProcesses) {
+                Group {
+                    Picker("", selection: $sortByCPU) {
+                        Text("CPU").tag(true)
+                        Text("Memory").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    ForEach(sortByCPU ? state.processes.topCPU : state.processes.topRAM) { proc in
+                        processRow(proc)
+                    }
+
+                    if let err = state.processActionError {
+                        Text(err).font(.caption2).foregroundColor(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } label: {
+                Text("All processes").font(.caption.weight(.medium))
+            }
+            .confirmationDialog(
+                "End \(killTarget?.name ?? "process")?",
+                isPresented: Binding(get: { killTarget != nil }, set: { if !$0 { killTarget = nil } }),
+                presenting: killTarget
+            ) { proc in
+                Button(forceKill ? "Force Quit" : "Quit", role: .destructive) {
+                    state.endProcess(proc, force: forceKill)
+                    killTarget = nil
+                }
+                Button("Cancel", role: .cancel) { killTarget = nil }
+            }
 
             Divider()
 
@@ -94,5 +132,26 @@ struct OverviewView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    private func processRow(_ proc: ProcessItem) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(proc.name).font(.caption).lineLimit(1)
+                Text("pid \(proc.pid)").font(.caption2.monospacedDigit()).foregroundColor(.secondary)
+            }
+            Spacer()
+            Text(String(format: "%.0f%%", sortByCPU ? proc.cpuPercent : proc.memPercent))
+                .font(.caption.monospacedDigit()).foregroundColor(.secondary)
+            Menu {
+                Button("Quit") { forceKill = false; killTarget = proc }
+                Button("Force Quit", role: .destructive) { forceKill = true; killTarget = proc }
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 28)
+        }
+        .padding(.vertical, 1)
     }
 }
