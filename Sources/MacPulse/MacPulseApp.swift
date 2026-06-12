@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 @main
 struct MacPulseApp: App {
@@ -19,9 +20,12 @@ struct MenuBarLabel: View {
     @ObservedObject var state: AppState
 
     var body: some View {
-        if state.showCPUInMenuBar, let snapshot = state.system {
-            Image(systemName: "waveform.path.ecg")
-            Text(String(format: "%.0f%%", snapshot.cpuPercent))
+        // Show live CPU/RAM/SSD readouts (Stats-app style: small label stacked over each value) when
+        // any metric is enabled and we have data; otherwise fall back to the bare pulse glyph so the
+        // menu bar item never disappears.
+        if let snapshot = state.system,
+           let image = MenuBarRenderer.image(metrics: state.menuBarMetrics(for: snapshot)) {
+            Image(nsImage: image).renderingMode(.template)
         } else {
             Image(systemName: "waveform.path.ecg")
         }

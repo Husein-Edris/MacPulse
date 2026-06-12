@@ -8,7 +8,7 @@ struct RootView: View {
     enum Tab: String, CaseIterable {
         case overview = "Overview"
         case github = "GitHub"
-        case linkedin = "LinkedIn"
+        case backups = "Backups"
         case tips = "Tips"
     }
 
@@ -34,7 +34,7 @@ struct RootView: View {
                     switch tab {
                     case .overview: OverviewView()
                     case .github: GitHubView()
-                    case .linkedin: LinkedInView()
+                    case .backups: BackupView()
                     case .tips: TipsView()
                     }
                 }

@@ -24,10 +24,25 @@ struct SettingsView: View {
             Divider()
 
             Group {
-                SectionHeader(title: "Behavior")
-                Toggle("Show CPU % in the menu bar", isOn: $state.showCPUInMenuBar)
+                SectionHeader(title: "Menu bar")
+                Text("Show live readouts in the menu bar.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Toggle("CPU %", isOn: $state.menuBarCPU)
                     .toggleStyle(.checkbox)
                     .font(.caption)
+                Toggle("Memory %", isOn: $state.menuBarRAM)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+                Toggle("Disk %", isOn: $state.menuBarDisk)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+            }
+
+            Divider()
+
+            Group {
+                SectionHeader(title: "Behavior")
                 Toggle("Launch at login", isOn: $state.launchAtLogin)
                     .toggleStyle(.checkbox)
                     .font(.caption)
@@ -45,7 +60,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("MacPulse 1.0.0")
                     .font(.caption.weight(.semibold))
-                Text("System, GitHub and LinkedIn dashboard for the menu bar. Native Swift, no third-party dependencies, all analysis on-device.")
+                Text("System and GitHub dashboard for the menu bar. Native Swift, no third-party dependencies, all analysis on-device.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

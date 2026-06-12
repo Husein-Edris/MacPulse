@@ -12,31 +12,40 @@ final class AppState: ObservableObject {
     @Published var githubLoading = false
     @Published var hotspots: StorageHotspots?
     @Published var hotspotsScanning = false
-    @Published var analysis: LinkedInAnalysis?
+    @Published var backup: BackupStatus?
     @Published var loginItemError: String?
-
-    @Published var profile: LinkedInProfile {
-        didSet {
-            saveProfile()
-            analysis = profile.isEmpty ? nil : LinkedInAnalyzer.analyze(profile)
-        }
-    }
 
     // MARK: - Settings
     @Published var githubUser: String {
         didSet { UserDefaults.standard.set(githubUser, forKey: Keys.githubUser) }
     }
-    @Published var showCPUInMenuBar: Bool {
-        didSet { UserDefaults.standard.set(showCPUInMenuBar, forKey: Keys.showCPU) }
+    // Which live metrics to show in the menu bar (Stats-app style). All independent.
+    @Published var menuBarCPU: Bool {
+        didSet { UserDefaults.standard.set(menuBarCPU, forKey: Keys.menuBarCPU) }
+    }
+    @Published var menuBarRAM: Bool {
+        didSet { UserDefaults.standard.set(menuBarRAM, forKey: Keys.menuBarRAM) }
+    }
+    @Published var menuBarDisk: Bool {
+        didSet { UserDefaults.standard.set(menuBarDisk, forKey: Keys.menuBarDisk) }
     }
     @Published var launchAtLogin: Bool {
         didSet { applyLaunchAtLogin() }
     }
 
+    /// Enabled menu-bar metrics (CPU/RAM/SSD) for the current sample; empty when all are toggled off.
+    func menuBarMetrics(for snapshot: SystemSnapshot) -> [MenuMetric] {
+        Fmt.menuBarMetrics(cpuPercent: snapshot.cpuPercent,
+                           ramPercent: snapshot.ramPercent,
+                           diskPercent: snapshot.diskPercent,
+                           showCPU: menuBarCPU, showRAM: menuBarRAM, showDisk: menuBarDisk)
+    }
+
     private enum Keys {
         static let githubUser = "githubUser"
-        static let showCPU = "showCPUInMenuBar"
-        static let profile = "linkedinProfile"
+        static let menuBarCPU = "showCPUInMenuBar"  // legacy key reused so the old preference carries over
+        static let menuBarRAM = "menuBarRAM"
+        static let menuBarDisk = "menuBarDisk"
         static let githubCache = "githubSnapshotCache"
     }
 
@@ -55,27 +64,21 @@ final class AppState: ObservableObject {
     init() {
         let defaults = UserDefaults.standard
         githubUser = defaults.string(forKey: Keys.githubUser) ?? "Husein-Edris"
-        showCPUInMenuBar = defaults.object(forKey: Keys.showCPU) as? Bool ?? true
+        menuBarCPU = defaults.object(forKey: Keys.menuBarCPU) as? Bool ?? true
+        menuBarRAM = defaults.object(forKey: Keys.menuBarRAM) as? Bool ?? true
+        menuBarDisk = defaults.object(forKey: Keys.menuBarDisk) as? Bool ?? true
         launchAtLogin = SMAppService.mainApp.status == .enabled
 
-        if let data = defaults.data(forKey: Keys.profile),
-           let saved = try? JSONDecoder().decode(LinkedInProfile.self, from: data) {
-            profile = saved
-        } else {
-            profile = LinkedInProfile()
-        }
         if let data = defaults.data(forKey: Keys.githubCache),
            let cached = try? JSONDecoder().decode(GitHubSnapshot.self, from: data) {
             github = cached
-        }
-        if !profile.isEmpty {
-            analysis = LinkedInAnalyzer.analyze(profile)
         }
 
         startTimers()
         refreshSystem()
         refreshSecurity(force: true)
         refreshGitHub()
+        refreshBackup()
     }
 
     // MARK: - Refresh
@@ -84,12 +87,21 @@ final class AppState: ObservableObject {
         refreshSystem()
         refreshSecurity(force: true)
         refreshGitHub(force: true)
+        refreshBackup()
+    }
+
+    func refreshBackup() {
+        Task.detached(priority: .utility) {
+            let status = BackupService.load()
+            await MainActor.run { self.backup = status }
+        }
     }
 
     func popoverOpened() {
         refreshSystem()
         refreshSecurity()
         refreshGitHub()
+        refreshBackup()
     }
 
     func refreshSystem() {
@@ -198,11 +210,6 @@ final class AppState: ObservableObject {
         }
         ghTimer.tolerance = 60
         githubTimer = ghTimer
-    }
-
-    private func saveProfile() {
-        guard let data = try? JSONEncoder().encode(profile) else { return }
-        UserDefaults.standard.set(data, forKey: Keys.profile)
     }
 
     private func applyLaunchAtLogin() {

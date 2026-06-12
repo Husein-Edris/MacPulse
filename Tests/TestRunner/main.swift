@@ -116,68 +116,51 @@ do {
     expectEq(GitHubParser.parseEvents(data: json, limit: 5).count, 5, "event limit respected")
 }
 
-// MARK: - LinkedInAnalyzer
+// MARK: - BackupParser
 
-print("LinkedInAnalyzer")
+print("BackupParser")
 
-func fullProfile() -> LinkedInProfile {
-    LinkedInProfile(
-        profileURL: "linkedin.com/in/test",
-        headline: "Senior Web Developer · WordPress & headless builds for SMEs",
-        about: String(repeating: "Shipped 30+ client sites with measurable results. ", count: 12),
-        hasPhoto: true,
-        hasBanner: true,
-        hasCustomURL: true,
-        connections: 800,
-        skillsCount: 20,
-        experienceCount: 3,
-        educationCount: 1,
-        featuredCount: 2,
-        recommendationsCount: 3,
-        postsPerMonth: 4
-    )
+let backupJSON = """
+{"generated_at":"2026-06-12T08:25:45+0200","overall":"warn",
+ "backups":{"projects":{"loaded":true,"last_exit":0,"last_run":"2026-06-11 17:02:43","ran_today":false,
+   "schedule":"13:00","failed":0,"covered":53,"project_folders":53,"size_today":"","db_dumps_today":0,"drive_readable":true,
+   "stale":[{"project":"x","last":"2026-06-11"}]},
+   "claude":{"loaded":true,"last_exit":0,"schedule":"12:00","drive_copies":7}},
+ "security":{"high":0,"scanned":40},
+ "github":{"on_github":30,"local_only":23,"drifted":[]},
+ "drill":{"status":"ok","checked":"2026-06-11 19:52:51","detail":"all good"},
+ "disk":{"mac_free":"19Gi","mac_used_pct":"85%","drive_backup_used":"12G","ssd_mounted":false,"ssd_free":"—"}}
+"""
+
+do {
+    let s = BackupParser.parse(Data(backupJSON.utf8))
+    expect(s != nil, "parses status.json")
+    expectEq(s?.overall, "warn", "overall parsed")
+    expectEq(s?.backups?.projects?.covered, 53, "covered parsed")
+    expectEq(s?.backups?.projects?.loaded, true, "projects loaded parsed")
+    expectEq(s?.backups?.claude?.driveCopies, 7, "claude drive copies parsed")
+    expectEq(s?.security?.high, 0, "security high parsed")
+    expectEq(s?.drill?.status, "ok", "drill status parsed")
+    expectEq(s?.disk?.macUsedPct, "85%", "disk percent parsed")
+    expectEq(s?.disk?.ssdMounted, false, "ssd mounted parsed")
 }
 
 do {
-    let analysis = LinkedInAnalyzer.analyze(LinkedInProfile())
-    expectEq(analysis.totalPoints, 0, "empty profile scores zero")
-    expectEq(analysis.grade, "F", "empty profile grades F")
-    expect(!analysis.topTips.isEmpty, "empty profile produces tips")
+    let s = BackupParser.parse(Data(backupJSON.utf8))!
+    let gen = BackupParser.generatedDate(s)!
+    expectEq(BackupParser.isStale(s, now: gen.addingTimeInterval(3600)), false, "fresh within 26h not stale")
+    expectEq(BackupParser.isStale(s, now: gen.addingTimeInterval(30 * 3600)), true, "older than 26h is stale")
+    expectEq(BackupParser.effectiveOverall(s, now: gen.addingTimeInterval(3600)), "warn", "fresh keeps reported overall")
+    expectEq(BackupParser.effectiveOverall(s, now: gen.addingTimeInterval(30 * 3600)), "fail", "stale forces fail")
 }
 
 do {
-    let analysis = LinkedInAnalyzer.analyze(fullProfile())
-    expectEq(analysis.totalPoints, analysis.maxPoints, "full profile hits maximum")
-    expectEq(analysis.maxPoints, 100, "max points is 100")
-    expectEq(analysis.grade, "A", "full profile grades A")
-    expect(analysis.topTips.isEmpty, "full profile has no tips")
-}
-
-do {
-    var profile = fullProfile()
-    profile.headline = "Developer"
-    let analysis = LinkedInAnalyzer.analyze(profile)
-    let headline = analysis.sections.first { $0.name == "Headline" }
-    expectEq(headline?.points, 5, "short headline gets partial credit")
-    expect(headline?.tip != nil, "short headline produces a tip")
-}
-
-do {
-    var profile = fullProfile()
-    profile.about = String(repeating: "Passionate developer who loves clean code. ", count: 15)
-    let analysis = LinkedInAnalyzer.analyze(profile)
-    let about = analysis.sections.first { $0.name == "About" }
-    expectEq(about?.points, 15, "about without numbers capped at 15")
-    expect(about?.tip != nil, "capped about suggests quantified results")
-}
-
-do {
-    var profile = fullProfile()
-    profile.hasPhoto = false
-    profile.hasBanner = false
-    let analysis = LinkedInAnalyzer.analyze(profile)
-    expectEq(analysis.totalPoints, 85, "missing photo+banner costs 15 points")
-    expectEq(analysis.grade, "B", "85 points grades B")
+    // Partial/garbage payloads must decode (or fail) without crashing.
+    expect(BackupParser.parse(Data("{}".utf8)) != nil, "empty object still decodes")
+    expect(BackupParser.parse(Data("not json".utf8)) == nil, "garbage returns nil")
+    let partial = BackupParser.parse(Data(#"{"overall":"ok"}"#.utf8))
+    expectEq(partial?.backups?.projects?.covered, nil, "missing nested fields stay nil")
+    expect(BackupParser.isStale(partial!, now: Date()), "missing timestamp counts as stale")
 }
 
 // MARK: - ImprovementsEngine
@@ -257,6 +240,20 @@ print("Fmt")
 expectEq(Fmt.gb(UInt64(16 * 1_073_741_824)), "16.0", "bytes to GB")
 expectEq(Fmt.uptime(86_400 * 13 + 3_600 * 4), "13d 4h", "uptime days+hours")
 expectEq(Fmt.uptime(125 * 60), "2h 5m", "uptime hours+minutes")
+
+expectEq(Fmt.menuBarMetrics(cpuPercent: 8, ramPercent: 61, diskPercent: 85,
+                            showCPU: true, showRAM: true, showDisk: true),
+         [MenuMetric(label: "CPU", value: "8%"), MenuMetric(label: "RAM", value: "61%"), MenuMetric(label: "SSD", value: "85%")],
+         "menu bar shows all three metrics labelled CPU/RAM/SSD")
+expectEq(Fmt.menuBarMetrics(cpuPercent: 8.4, ramPercent: 61, diskPercent: 85,
+                            showCPU: true, showRAM: false, showDisk: false),
+         [MenuMetric(label: "CPU", value: "8%")], "menu bar CPU-only, rounded")
+expectEq(Fmt.menuBarMetrics(cpuPercent: 8, ramPercent: 61, diskPercent: 85,
+                            showCPU: false, showRAM: true, showDisk: true),
+         [MenuMetric(label: "RAM", value: "61%"), MenuMetric(label: "SSD", value: "85%")], "menu bar respects disabled CPU")
+expectEq(Fmt.menuBarMetrics(cpuPercent: 8, ramPercent: 61, diskPercent: 85,
+                            showCPU: false, showRAM: false, showDisk: false),
+         [], "menu bar empty when all metrics off")
 
 // MARK: - Summary
 

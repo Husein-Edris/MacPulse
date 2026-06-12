@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 mkdir -p .build
 swiftc -O \
     Sources/MacPulse/GitHubParser.swift \
-    Sources/MacPulse/LinkedInAnalyzer.swift \
+    Sources/MacPulse/BackupStatus.swift \
     Sources/MacPulse/ImprovementsEngine.swift \
     Sources/MacPulse/SecurityAudit.swift \
     Sources/MacPulse/Shell.swift \

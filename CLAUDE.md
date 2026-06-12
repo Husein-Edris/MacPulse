@@ -2,10 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-MacPulse — a native SwiftUI menu bar app (macOS 13+) showing system health, a
-GitHub dashboard, a local LinkedIn profile analyzer, and rule-based improvement
-tips. Zero third-party dependencies; ~450 KB app bundle. The README covers
-features and user-facing docs; this file covers what will bite you when editing.
+MacPulse — a native SwiftUI menu bar app (macOS 13+) showing system health
+(with live CPU/RAM/disk readouts in the menu bar), a GitHub dashboard, a backup
+monitor, and rule-based improvement tips. Zero third-party dependencies; ~470 KB
+app bundle. The README covers features and user-facing docs; this file covers
+what will bite you when editing.
 
 ## Commands
 
@@ -40,8 +41,8 @@ that runs in a few seconds. To iterate on one area, comment out other sections l
 One-way flow: services sample/fetch → `AppState` (single `@MainActor ObservableObject`)
 publishes → SwiftUI views render. Views never call services directly.
 
-- **Pure logic vs I/O is a hard boundary.** `GitHubParser`, `LinkedInAnalyzer`,
-  `ImprovementsEngine` are pure functions with no networking/filesystem — that's what
+- **Pure logic vs I/O is a hard boundary.** `GitHubParser`, `ImprovementsEngine`, and
+  the `Fmt` helpers are pure functions with no networking/filesystem — that's what
   makes them testable without XCTest. Keep new logic on the pure side and inject data.
 - **`AppState` owns all timers and caching policy**: system sample every 5s
   (tolerance 2s), GitHub every 15 min (cached in UserDefaults so the UI has data on
@@ -58,16 +59,25 @@ publishes → SwiftUI views render. Views never call services directly.
   no longer ships the "N contributions in the last year" headline. If GitHub changes
   the `data-date`/`data-level` markup, `GitHubParser.parseContributions` is the only
   place to fix.
-- **LinkedIn is local-only** — no API exists; scraping violates LinkedIn ToS. Profile
-  data is user-entered, stored in UserDefaults, analyzed offline. Don't "improve" this
-  with scraping.
+- **Backups tab reads a local file, not the network.** `BackupService.load()` reads
+  `~/Projects/backup-automation/web/data/status.json` (the same JSON that repo's
+  `collect-status.sh` writes and its web dashboard renders); decoding + staleness live in
+  the pure, tested `BackupParser`/`BackupStatus`. The public dashboard URL is login-gated and
+  serves the raw JSON as 403, so the local file is the correct source. All `BackupStatus`
+  fields are optional so a partial/older status.json still decodes; unknown keys are ignored.
+- **Menu-bar readout** is `MenuBarLabel` in `MacPulseApp.swift`. `Fmt.menuBarMetrics(...)`
+  (pure, tested) decides which `MenuMetric`s show; `MenuBarRenderer.image(...)` draws them
+  Stats-style — a small label stacked above each value — as a **template** `NSImage` so the
+  menu bar tints it for light/dark. Three independent `AppState` toggles drive it
+  (`menuBarCPU/menuBarRAM/menuBarDisk`); the CPU one persists under the legacy
+  `showCPUInMenuBar` key so existing installs keep their preference. `MenuBarRenderer` uses
+  AppKit, so it's not in the `scripts/test.sh` pure-logic list — verify its output by
+  rendering to a PNG (see the menu-bar preview approach), not via the unit runner.
 
 ## Conventions
 
 - No third-party dependencies — that's a feature (size, security, supply chain).
 - System binaries are called with absolute paths and array args via `Shell.run`
   (never a shell string — no injection surface).
-- LinkedIn scoring sections must sum to exactly 100 (`testFullProfileScoresMaximum`
-  guards this — rebalance other sections when adding one).
 - `legacy/` holds the retired Bash dashboard this app replaced. Don't touch it.
 - `logs/` is leftover data from the legacy scripts, gitignored.
