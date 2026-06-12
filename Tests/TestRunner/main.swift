@@ -163,6 +163,27 @@ do {
     expect(BackupParser.isStale(partial!, now: Date()), "missing timestamp counts as stale")
 }
 
+// MARK: - ProcessParser
+
+print("ProcessParser")
+
+do {
+    let out = """
+      PID %CPU %MEM COMM
+     1234 12.5  3.2 Google Chrome Helper
+       42  0.0  0.1 launchd
+     garbage line here
+        0  9.9  9.9 kernel_task
+    """
+    let items = ProcessParser.parse(out)
+    expectEq(items.count, 2, "parses two valid rows, drops header/garbage/pid-0")
+    expectEq(items[0].pid, 1234, "first pid parsed")
+    expectEq(items[0].name, "Google Chrome Helper", "comm keeps internal spaces")
+    expectEq(items[0].cpuPercent, 12.5, "cpu parsed")
+    expectEq(items[1].name, "launchd", "second row name parsed")
+    expectEq(items[1].memPercent, 0.1, "mem parsed")
+}
+
 // MARK: - ImprovementsEngine
 
 print("ImprovementsEngine")
