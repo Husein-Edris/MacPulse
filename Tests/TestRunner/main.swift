@@ -463,6 +463,45 @@ do {
     expectEq(Fmt.until(now.addingTimeInterval(86_400 + 3 * 3_600), now: now), "1d 3h", "days+hours")
 }
 
+// MARK: - ClaudeUsageParser (activity)
+
+print("ClaudeUsageParser — activity")
+
+do {
+    let line = """
+    {"type":"assistant","sessionId":"s1","timestamp":"2026-06-22T10:00:00Z","cwd":"/Users/x/Projects/MacPulse","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":20},"content":[{"type":"tool_use"},{"type":"text"},{"type":"tool_use"}]}}
+    """
+    let rec = ClaudeUsageParser.decodeRecord(line)
+    expect(rec != nil, "decodes an assistant line")
+    expectEq(rec?.sessionId ?? "", "s1", "captures sessionId")
+    expectEq(rec?.toolCalls ?? -1, 2, "counts tool_use blocks")
+    expectEq(rec?.inputTokens ?? -1, 100, "captures input tokens")
+    expectEq(rec?.projectPath ?? "", "/Users/x/Projects/MacPulse", "captures cwd")
+
+    expect(ClaudeUsageParser.decodeRecord("{\"type\":\"user\"}") == nil, "skips non-assistant lines")
+    expect(ClaudeUsageParser.decodeRecord("") == nil, "skips blank lines")
+}
+
+do {
+    let now = ISO8601DateFormatter().date(from: "2026-06-22T12:00:00Z")!
+    func rec(_ session: String, _ iso: String, tools: Int = 0) -> UsageRecord {
+        UsageRecord(date: ISO8601DateFormatter().date(from: iso)!, sessionId: session,
+                    projectPath: nil, model: nil, inputTokens: 10, outputTokens: 5, toolCalls: tools)
+    }
+    let byProject: [String: [UsageRecord]] = [
+        "MacPulse": [rec("s1", "2026-06-22T09:00:00Z", tools: 3),    // today
+                     rec("s1", "2026-06-20T09:00:00Z")],              // within 7d, same session
+        "other":    [rec("s2", "2026-06-01T09:00:00Z")],             // within 30d
+    ]
+    let a = ClaudeUsageParser.activity(byProject: byProject, now: now)
+    expectEq(a.today.messages, 1, "today counts only same-day records")
+    expectEq(a.last7.messages, 2, "7-day window")
+    expectEq(a.last7.sessions, 1, "7-day distinct sessions")
+    expectEq(a.last30.messages, 3, "30-day window")
+    expectEq(a.allTime.toolCalls, 3, "all-time tool calls summed")
+    expectEq(a.projects.first?.name ?? "", "MacPulse", "projects sorted by messages desc")
+}
+
 // MARK: - Summary
 
 print(String(repeating: "─", count: 40))

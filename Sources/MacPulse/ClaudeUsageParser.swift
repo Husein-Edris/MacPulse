@@ -14,6 +14,45 @@ struct ClaudeLimits: Codable, Equatable {
     var weekly: LimitWindow?
 }
 
+struct UsageRecord: Equatable {
+    var date: Date
+    var sessionId: String
+    var projectPath: String?
+    var model: String?
+    var inputTokens: Int
+    var outputTokens: Int
+    var toolCalls: Int
+}
+
+struct ActivityBucket: Codable, Equatable {
+    var messages: Int
+    var sessions: Int
+    var toolCalls: Int
+    var inputTokens: Int
+    var outputTokens: Int
+    static let empty = ActivityBucket(messages: 0, sessions: 0, toolCalls: 0, inputTokens: 0, outputTokens: 0)
+}
+
+struct ProjectActivity: Codable, Equatable, Identifiable {
+    var id: String { name }
+    var name: String
+    var messages: Int
+    var sessions: Int
+    var toolCalls: Int
+    var inputTokens: Int
+    var outputTokens: Int
+    var lastActive: Date?
+}
+
+struct ClaudeActivity: Codable, Equatable {
+    var today: ActivityBucket
+    var last7: ActivityBucket
+    var last30: ActivityBucket
+    var allTime: ActivityBucket
+    var projects: [ProjectActivity]
+    static let empty = ClaudeActivity(today: .empty, last7: .empty, last30: .empty, allTime: .empty, projects: [])
+}
+
 /// Pure parsing/aggregation for Claude Code usage. No file or network I/O.
 enum ClaudeUsageParser {
     /// Decodes the `GET /api/oauth/usage` body. Defensive: unknown shape variants
@@ -43,5 +82,65 @@ enum ClaudeUsageParser {
         let plain = ISO8601DateFormatter()
         plain.formatOptions = [.withInternetDateTime]
         return plain.date(from: s)
+    }
+
+    /// One JSONL transcript line → a record, counting only assistant (model) turns.
+    /// Returns nil for user/system/other lines and unparseable input.
+    static func decodeRecord(_ line: String) -> UsageRecord? {
+        guard let data = line.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (obj["type"] as? String) == "assistant",
+              let sessionId = obj["sessionId"] as? String,
+              let ts = obj["timestamp"] as? String,
+              let date = parseDate(ts)
+        else { return nil }
+        let msg = obj["message"] as? [String: Any]
+        let usage = msg?["usage"] as? [String: Any]
+        var toolCalls = 0
+        if let content = msg?["content"] as? [[String: Any]] {
+            toolCalls = content.filter { ($0["type"] as? String) == "tool_use" }.count
+        }
+        return UsageRecord(
+            date: date,
+            sessionId: sessionId,
+            projectPath: obj["cwd"] as? String,
+            model: msg?["model"] as? String,
+            inputTokens: (usage?["input_tokens"] as? Int) ?? 0,
+            outputTokens: (usage?["output_tokens"] as? Int) ?? 0,
+            toolCalls: toolCalls
+        )
+    }
+
+    private static func bucket(_ records: [UsageRecord]) -> ActivityBucket {
+        ActivityBucket(
+            messages: records.count,
+            sessions: Set(records.map(\.sessionId)).count,
+            toolCalls: records.reduce(0) { $0 + $1.toolCalls },
+            inputTokens: records.reduce(0) { $0 + $1.inputTokens },
+            outputTokens: records.reduce(0) { $0 + $1.outputTokens }
+        )
+    }
+
+    /// Rolls per-project records into windowed buckets + a per-project breakdown.
+    static func activity(byProject: [String: [UsageRecord]], now: Date) -> ClaudeActivity {
+        let all = byProject.values.flatMap { $0 }
+        let cal = Calendar.current
+        let weekAgo = now.addingTimeInterval(-7 * 86_400)
+        let monthAgo = now.addingTimeInterval(-30 * 86_400)
+
+        let projects = byProject.map { name, recs -> ProjectActivity in
+            let b = bucket(recs)
+            return ProjectActivity(name: name, messages: b.messages, sessions: b.sessions,
+                                   toolCalls: b.toolCalls, inputTokens: b.inputTokens,
+                                   outputTokens: b.outputTokens, lastActive: recs.map(\.date).max())
+        }.sorted { $0.messages > $1.messages }
+
+        return ClaudeActivity(
+            today: bucket(all.filter { cal.isDate($0.date, inSameDayAs: now) }),
+            last7: bucket(all.filter { $0.date >= weekAgo }),
+            last30: bucket(all.filter { $0.date >= monthAgo }),
+            allTime: bucket(all),
+            projects: projects
+        )
     }
 }
