@@ -55,10 +55,20 @@ struct ClaudeUsageView: View {
 
     @ViewBuilder
     private func limitRow(_ label: String, _ window: LimitWindow?) -> some View {
-        if let window, let pct = window.percent {
+        if let window {
             VStack(alignment: .leading, spacing: 2) {
-                MetricBar(label: label, valueText: String(format: "%.0f%%", pct),
-                          percent: pct, warnAt: 75, critAt: 90)
+                if let pct = window.percent {
+                    MetricBar(label: label, valueText: String(format: "%.0f%%", pct),
+                              percent: pct, warnAt: 75, critAt: 90)
+                } else {
+                    // Window exists but utilization is unavailable — keep the row so the
+                    // reset countdown still shows, rather than silently dropping it.
+                    HStack {
+                        Text(label).font(.caption.weight(.medium)).foregroundColor(.secondary)
+                        Spacer()
+                        Text("—").font(.caption.monospacedDigit()).foregroundColor(.secondary)
+                    }
+                }
                 if let resets = window.resetsAt {
                     Text("resets in \(Fmt.until(resets))")
                         .font(.caption2).foregroundColor(.secondary)
