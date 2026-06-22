@@ -30,6 +30,13 @@ A native macOS menu bar app that keeps your machine's health and your GitHub pre
 - Reads the collector's local `status.json` directly — no network, no login, nothing leaves the Mac
 - Shows a friendly empty state if the backup tooling isn't set up on this machine
 
+**Claude Code tab**
+- Subscription-limit gauges for the 5-hour, 7-day, and weekly windows — each showing % used and a reset countdown
+- Activity stats for today, last 7 days, last 30 days, and all time (messages + tokens)
+- Per-project breakdown so you can see where usage is concentrated
+- Manual reload button with a "last updated X ago" timestamp; refreshes automatically when the tab opens
+- Reads local Claude Code transcripts (`~/.claude/projects/**/*.jsonl`) plus one live call to the Anthropic usage API — nothing is written to disk, the OAuth token is held in memory only
+
 **Tips tab**
 - Rule-based improvement findings sorted by severity: disk almost full, RAM pressure, security features disabled, long uptime
 - On-demand storage hotspot scan (Caches / Trash / Downloads sizes) with one-click reveal

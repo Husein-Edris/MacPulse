@@ -95,6 +95,15 @@ publishes → SwiftUI views render. Views never call services directly.
   `BackupLocations` resolves the Google Drive `projects-backup`/`claude-backups` folders
   (via a CloudStorage glob — no hardcoded email), the SSD, and the launchd log paths so the
   Backups tab can reveal them in Finder (buttons disabled when a destination isn't mounted).
+- **Claude tab reads local transcripts + one usage call.** `ClaudeUsageService.loadActivity()`
+  walks `~/.claude/projects/**/*.jsonl` (assistant turns only) and the pure, tested
+  `ClaudeUsageParser` aggregates per-day/per-project activity; `fetchLimits()` GETs
+  `https://api.anthropic.com/api/oauth/usage` for the 5-hour/7-day/weekly utilization.
+  **Security boundary:** the OAuth token is read in-memory from the keychain
+  (`Claude Code-credentials`) via `ClaudeAuth` — never persisted; only the utilization
+  %s and counts are cached (`claudeUsageCacheV1`). Refresh is tab-open-gated + manual
+  reload, like the popover-gated `ps` scan. `ClaudeUsageParser` is in the
+  `scripts/test.sh` pure-logic list.
 - **Menu-bar readout** is `MenuBarLabel` in `MacPulseApp.swift`. `Fmt.menuBarMetrics(...)`
   (pure, tested) decides which `MenuMetric`s show; `MenuBarRenderer.image(...)` draws them
   Stats-style — a small label stacked above each value — as a **template** `NSImage` so the
