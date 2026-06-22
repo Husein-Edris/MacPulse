@@ -15,6 +15,8 @@ final class AppState: ObservableObject {
     @Published var largeFiles: [LargeFile]?
     @Published var largeFilesScanning = false
     @Published var backup: BackupStatus?
+    @Published var claudeUsage: ClaudeUsageSnapshot?
+    @Published var claudeUsageLoading = false
     @Published var loginItemError: String?
     @Published var processActionError: String?
 
@@ -50,6 +52,7 @@ final class AppState: ObservableObject {
         static let menuBarRAM = "menuBarRAM"
         static let menuBarDisk = "menuBarDisk"
         static let githubCache = "githubSnapshotCacheV2"
+        static let claudeUsage = "claudeUsageCacheV1"
     }
 
     private let monitor = SystemMonitor()
@@ -65,6 +68,7 @@ final class AppState: ObservableObject {
 
     private static let githubInterval: TimeInterval = 900       // 15 min
     private static let securityStaleAfter: TimeInterval = 1_800 // 30 min
+    private static let claudeUsageStaleAfter: TimeInterval = 30
 
     // MARK: - Init
 
@@ -79,6 +83,11 @@ final class AppState: ObservableObject {
         if let data = defaults.data(forKey: Keys.githubCache),
            let cached = try? JSONDecoder().decode(GitHubSnapshot.self, from: data) {
             github = cached
+        }
+
+        if let data = defaults.data(forKey: Keys.claudeUsage),
+           let cached = try? JSONDecoder().decode(ClaudeUsageSnapshot.self, from: data) {
+            claudeUsage = cached
         }
 
         startTimers()
@@ -208,6 +217,28 @@ final class AppState: ObservableObject {
                 self.githubError = error.localizedDescription
             }
             self.githubLoading = false
+        }
+    }
+
+    /// Parses local transcripts + fetches subscription limits. Tab-open-gated
+    /// (skips when a recent snapshot exists) unless forced by the reload button.
+    /// Only the resulting aggregates are cached — the OAuth token never is.
+    func refreshClaudeUsage(force: Bool = false) {
+        guard !claudeUsageLoading else { return }
+        if !force, let snap = claudeUsage,
+           Date().timeIntervalSince(snap.updatedAt) < Self.claudeUsageStaleAfter { return }
+        claudeUsageLoading = true
+        Task {
+            let activity = await Task.detached(priority: .utility) {
+                ClaudeUsageService.loadActivity()
+            }.value
+            let limits = await ClaudeUsageService.fetchLimits()
+            let snapshot = ClaudeUsageSnapshot(activity: activity, limits: limits, updatedAt: Date())
+            self.claudeUsage = snapshot
+            if let data = try? JSONEncoder().encode(snapshot) {
+                UserDefaults.standard.set(data, forKey: Keys.claudeUsage)
+            }
+            self.claudeUsageLoading = false
         }
     }
 

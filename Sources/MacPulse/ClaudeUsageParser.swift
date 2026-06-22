@@ -53,6 +53,13 @@ struct ClaudeActivity: Codable, Equatable {
     static let empty = ClaudeActivity(today: .empty, last7: .empty, last30: .empty, allTime: .empty, projects: [])
 }
 
+/// What the Claude tab renders. Cached in UserDefaults — token is NEVER part of it.
+struct ClaudeUsageSnapshot: Codable {
+    var activity: ClaudeActivity
+    var limits: ClaudeLimits?
+    var updatedAt: Date
+}
+
 /// Pure parsing/aggregation for Claude Code usage. No file or network I/O.
 enum ClaudeUsageParser {
     /// Decodes the `GET /api/oauth/usage` body. Defensive: unknown shape variants
