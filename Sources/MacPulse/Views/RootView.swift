@@ -9,6 +9,7 @@ struct RootView: View {
         case overview = "Overview"
         case github = "GitHub"
         case backups = "Backups"
+        case claude = "Claude"
         case tips = "Tips"
     }
 
@@ -35,6 +36,7 @@ struct RootView: View {
                     case .overview: OverviewView()
                     case .github: GitHubView()
                     case .backups: BackupView()
+                    case .claude: ClaudeUsageView()
                     case .tips: TipsView()
                     }
                 }
