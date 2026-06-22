@@ -14,6 +14,7 @@ swiftc -O \
     Sources/MacPulse/SecurityAudit.swift \
     Sources/MacPulse/Shell.swift \
     Sources/MacPulse/Formatters.swift \
+    Sources/MacPulse/ClaudeUsageParser.swift \
     Tests/TestRunner/main.swift \
     -o .build/testrunner
 

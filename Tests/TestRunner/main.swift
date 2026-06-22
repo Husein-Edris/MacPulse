@@ -428,6 +428,41 @@ expectEq(Fmt.menuBarMetrics(cpuPercent: 8, ramPercent: 61, diskPercent: 85,
                             showCPU: false, showRAM: false, showDisk: false),
          [], "menu bar empty when all metrics off")
 
+// MARK: - ClaudeUsageParser (limits)
+
+print("ClaudeUsageParser — limits")
+
+do {
+    let json = """
+    {"five_hour":{"utilization":0.42,"resets_at":"2026-06-22T20:00:00Z"},
+     "seven_day":{"utilization":12,"resets_at":"2026-06-29T00:00:00Z"},
+     "weekly":{"utilization":0.9}}
+    """.data(using: .utf8)!
+    let limits = ClaudeUsageParser.parseLimits(json)
+    expect(limits != nil, "parses a usage response")
+    expectEq(limits?.fiveHour?.percent ?? -1, 42, "0–1 fraction → percent")
+    expectEq(limits?.sevenDay?.percent ?? -1, 12, "already-percent value kept as-is")
+    expect(limits?.weekly?.resetsAt == nil, "missing resets_at decodes to nil")
+    expect(limits?.fiveHour?.resetsAt != nil, "resets_at parses")
+}
+
+do {
+    expect(ClaudeUsageParser.parseLimits("not json".data(using: .utf8)!) == nil, "garbage → nil")
+    expect(ClaudeUsageParser.parseLimits("{}".data(using: .utf8)!) == nil, "no windows → nil")
+}
+
+// MARK: - Fmt.until
+
+print("Fmt.until")
+
+do {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    expectEq(Fmt.until(now.addingTimeInterval(60 * 134), now: now), "2h 14m", "hours+minutes")
+    expectEq(Fmt.until(now.addingTimeInterval(45 * 60), now: now), "45m", "minutes only")
+    expectEq(Fmt.until(now.addingTimeInterval(-10), now: now), "now", "past → now")
+    expectEq(Fmt.until(now.addingTimeInterval(86_400 + 3 * 3_600), now: now), "1d 3h", "days+hours")
+}
+
 // MARK: - Summary
 
 print(String(repeating: "─", count: 40))

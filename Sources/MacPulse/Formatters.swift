@@ -47,4 +47,14 @@ enum Fmt {
         if diff < 86_400 { return "\(diff / 3_600)h ago" }
         return "\(diff / 86_400)d ago"
     }
+
+    /// Countdown to a future reset, e.g. "2h 14m" or "1d 3h". "now" when past.
+    static func until(_ date: Date, now: Date = Date()) -> String {
+        let diff = Int(date.timeIntervalSince(now))
+        if diff <= 0 { return "now" }
+        if diff >= 86_400 { return "\(diff / 86_400)d \((diff % 86_400) / 3_600)h" }
+        let h = diff / 3_600, m = (diff % 3_600) / 60
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
+    }
 }
