@@ -190,6 +190,98 @@ do {
     expect(BackupParser.isStale(partial!, now: Date()), "missing timestamp counts as stale")
 }
 
+// New failure-visibility fields (added to status.json by the collector). All optional;
+// older files without them must still decode (covered by the partial-payload test above).
+let backupJSONv2 = """
+{"generated_at":"2026-06-22T12:09:35+0200","overall":"warn",
+ "backups":{"projects":{"loaded":true,"last_exit":0,"last_run":"2026-06-21 13:08:38","ran_today":false,
+   "schedule":"13:00","last_attempt":"2026-06-21 13:07:56","last_success":"2026-06-21 13:08:38",
+   "run_state":"idle","archived":1,"failed":2,"db_failed":1,"covered":51,"never_backed":3,
+   "project_folders":52,"size_today":"—","db_dumps_today":0,"drive_readable":true},
+   "claude":{"loaded":true,"last_exit":0,"last_run":"2026-06-22 12:00:08","ran_today":true,
+     "last_attempt":"2026-06-22 12:00:00","last_success":"2026-06-22 12:00:08","schedule":"12:00","drive_copies":7}},
+ "security":{"high":1,"scanned":14},
+ "drill":{"status":"ok","checked":"2026-06-21 15:06:23","detail":"ok","stale":true,
+   "decrypt_ok":true,"file_count":120,"live_count":119,"pct":99,"db_ok":true},
+ "disk":{"mac_free":"26Gi","mac_used_pct":"84%","drive_backup_used":"6.1G","ssd_mounted":false,
+   "ssd_free":"—","ssd_last":"2026-05-28","ssd_stale_days":25},
+ "events":[
+   {"epoch":1782047183,"time":"2026-06-21 15:06:23","source":"drill","level":"fail","msg":"restore drill FAILED: x"},
+   {"epoch":1782050000,"time":"2026-06-21 15:53:20","source":"projects","level":"warn","msg":"3 projects never backed up"}
+ ]}
+"""
+
+do {
+    let s = BackupParser.parse(Data(backupJSONv2.utf8))
+    expect(s != nil, "v2 status.json decodes")
+    let pj = s?.backups?.projects
+    expectEq(pj?.dbFailed, 1, "db_failed parsed")
+    expectEq(pj?.neverBacked, 3, "never_backed parsed")
+    expectEq(pj?.runState, "idle", "run_state parsed")
+    expectEq(pj?.lastSuccess, "2026-06-21 13:08:38", "projects last_success parsed")
+    expectEq(pj?.lastAttempt, "2026-06-21 13:07:56", "projects last_attempt parsed")
+    expectEq(s?.backups?.claude?.ranToday, true, "claude ran_today parsed")
+    expectEq(s?.backups?.claude?.lastSuccess, "2026-06-22 12:00:08", "claude last_success parsed")
+    expectEq(s?.drill?.stale, true, "drill stale parsed")
+    expectEq(s?.drill?.decryptOk, true, "drill decrypt_ok parsed")
+    expectEq(s?.drill?.fileCount, 120, "drill file_count parsed")
+    expectEq(s?.drill?.liveCount, 119, "drill live_count parsed")
+    expectEq(s?.drill?.pct, 99, "drill pct parsed")
+    expectEq(s?.drill?.dbOk, true, "drill db_ok parsed")
+    expectEq(s?.disk?.ssdLast, "2026-05-28", "disk ssd_last parsed")
+    expectEq(s?.disk?.ssdStaleDays, 25, "disk ssd_stale_days parsed")
+    expectEq(s?.events?.count, 2, "events array parsed")
+    expectEq(s?.events?.first?.source, "drill", "event source parsed")
+    expectEq(s?.events?.first?.level, "fail", "event level parsed")
+    expectEq(s?.events?.first?.epoch, 1782047183, "event epoch parsed")
+}
+
+do {
+    // brokenReasons mirrors the dashboard's failing-reason list.
+    let s = BackupParser.parse(Data(backupJSONv2.utf8))!
+    let reasons = BackupParser.brokenReasons(s)
+    let texts = reasons.map(\.text)
+    expect(texts.contains { $0.contains("2 project backups failed") }, "failed>0 reason present")
+    expect(texts.contains { $0.contains("1 database dump failed") }, "db_failed>0 reason present")
+    expect(texts.contains { $0.contains("3 projects never backed up") }, "never_backed>0 reason present")
+    expect(texts.contains { $0.contains("projects-backup hasn't run today") }, "projects not-run-today reason present")
+    expect(!texts.contains { $0.contains("claude-backup hasn't run today") }, "claude ran today → no reason")
+    expect(texts.contains { $0.contains("restore drill stale") }, "drill stale (status ok) → warn reason")
+    expect(!texts.contains { $0.contains("restore drill failed") }, "drill ok → no fail reason")
+    expect(texts.contains { $0.contains("SSD backup is 25 days old") }, "ssd_stale_days>=14 reason present")
+    expect(texts.contains { $0.contains("1 secret found") }, "security.high>0 reason present")
+}
+
+do {
+    // Healthy status → no broken reasons (using the original warn fixture's ok parts isn't
+    // enough; build a clean one explicitly).
+    let healthy = """
+    {"backups":{"projects":{"failed":0,"db_failed":0,"never_backed":0,"ran_today":true},
+      "claude":{"ran_today":true}},
+     "security":{"high":0},"drill":{"status":"ok","stale":false},"disk":{"ssd_stale_days":2}}
+    """
+    let s = BackupParser.parse(Data(healthy.utf8))!
+    expect(BackupParser.brokenReasons(s).isEmpty, "fully-healthy status has no broken reasons")
+}
+
+do {
+    // sortedEvents must return newest-first by epoch even when input is out of order.
+    let json = """
+    {"events":[
+      {"epoch":100,"source":"a","level":"warn","msg":"old"},
+      {"epoch":300,"source":"b","level":"fail","msg":"new"},
+      {"epoch":200,"source":"c","level":"warn","msg":"mid"}
+    ]}
+    """
+    let s = BackupParser.parse(Data(json.utf8))!
+    let sorted = BackupParser.sortedEvents(s, limit: 6)
+    expectEq(sorted.count, 3, "all three events returned")
+    expectEq(sorted[0].epoch, 300, "newest event first")
+    expectEq(sorted[2].epoch, 100, "oldest event last")
+    expectEq(BackupParser.sortedEvents(s, limit: 2).count, 2, "event limit respected")
+    expect(BackupParser.sortedEvents(BackupParser.parse(Data("{}".utf8))!).isEmpty, "no events → empty list")
+}
+
 // MARK: - ProcessParser
 
 print("ProcessParser")
