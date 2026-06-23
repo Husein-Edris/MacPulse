@@ -1,5 +1,7 @@
 # MacPulse
 
+![MacPulse](assets/cover.png)
+
 A native macOS menu bar app that keeps your machine's health and your GitHub presence one click away — with live CPU/memory/disk readouts right in the menu bar. Written in pure Swift/SwiftUI with **zero third-party dependencies** — the whole app weighs under 600 KB.
 
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-brightgreen)
