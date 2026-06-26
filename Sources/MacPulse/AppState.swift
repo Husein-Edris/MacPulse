@@ -5,6 +5,8 @@ import ServiceManagement
 final class AppState: ObservableObject {
     // MARK: - Live data
     @Published var system: SystemSnapshot?
+    /// Rolling in-memory CPU history (sparkline + threshold-triggered spike captures).
+    @Published var cpuHistory = CPUHistory()
     @Published var processes = ProcessSnapshot(topCPU: [], topRAM: [])
     @Published var security: SecurityStatus?
     @Published var github: GitHubSnapshot?
@@ -62,6 +64,7 @@ final class AppState: ObservableObject {
     private var processTimer: Timer?
     private var isPopoverOpen = false
     private var isSampling = false
+    private var isCapturingSpike = false
     private var onBattery = PowerSource.onBattery
     private static let processInterval: TimeInterval = 5
     private var isApplyingLoginItem = false
@@ -149,7 +152,34 @@ final class AppState: ObservableObject {
             let snapshot = monitor.sample()
             await MainActor.run {
                 self.system = snapshot
+                self.cpuHistory.addSample(percent: snapshot.cpuPercent, at: snapshot.date)
                 self.isSampling = false
+                self.maybeCaptureSpike(snapshot)
+            }
+        }
+    }
+
+    /// When CPU crosses the spike threshold (and the cooldown has elapsed), run a
+    /// one-off `ps` scan to record *what* spiked. Bounded by the threshold + cooldown
+    /// in `CPUHistory`, and by `isCapturingSpike` so ticks never double-fire the scan.
+    /// This is the only path that runs `ps` while the popover is closed.
+    private func maybeCaptureSpike(_ snapshot: SystemSnapshot) {
+        guard !isCapturingSpike,
+              cpuHistory.shouldCaptureSpike(percent: snapshot.cpuPercent, at: snapshot.date)
+        else { return }
+        isCapturingSpike = true
+        let monitor = self.monitor
+        let date = snapshot.date
+        let cpu = snapshot.cpuPercent
+        Task.detached(priority: .utility) {
+            let procs = monitor.sampleProcesses(top: 5)
+            await MainActor.run {
+                self.cpuHistory.recordSpike(SpikeEvent(
+                    date: date,
+                    cpuPercent: cpu,
+                    processes: procs.topCPU
+                ))
+                self.isCapturingSpike = false
             }
         }
     }
@@ -273,6 +303,7 @@ final class AppState: ObservableObject {
         if let s = system {
             ctx.cpuPercent = s.cpuPercent
             ctx.ramPercent = s.ramPercent
+            ctx.swapUsedGB = s.swapUsedGB
             ctx.diskPercent = s.diskPercent
             ctx.diskFreeGB = Double(s.diskFreeBytes) / 1_073_741_824
             ctx.uptimeDays = s.uptimeDays

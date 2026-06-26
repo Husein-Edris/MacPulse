@@ -5,22 +5,37 @@ struct OverviewView: View {
 
     @State private var showAllProcesses = false
     @State private var sortByCPU = true
-    @State private var killTarget: ProcessItem?
-    @State private var forceKill = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let s = state.system {
-                MetricBar(
-                    label: "CPU",
-                    valueText: String(format: "%.1f%%  ·  %d cores", s.cpuPercent, s.coreCount),
-                    percent: s.cpuPercent, warnAt: 50, critAt: 80
-                )
-                MetricBar(
-                    label: "Memory",
-                    valueText: "\(Fmt.gb(s.ramUsedBytes)) / \(Fmt.gb(s.ramTotalBytes)) GB  (\(Int(s.ramPercent))%)",
-                    percent: s.ramPercent, warnAt: 60, critAt: 80
-                )
+                VStack(alignment: .leading, spacing: 4) {
+                    MetricBar(
+                        label: "CPU",
+                        valueText: String(format: "%.1f%%  ·  %d cores", s.cpuPercent, s.coreCount),
+                        percent: s.cpuPercent, warnAt: 50, critAt: 80
+                    )
+                    if state.cpuHistory.samples.count >= 2 {
+                        HStack(spacing: 6) {
+                            Sparkline(samples: state.cpuHistory.samples)
+                                .frame(height: 24)
+                            Text(String(format: "peak %.0f%%", state.cpuHistory.peakPercent))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundColor(.secondary)
+                                .fixedSize()
+                        }
+                    }
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    MetricBar(
+                        label: "Memory",
+                        valueText: "\(Fmt.gb(s.ramUsedBytes)) / \(Fmt.gb(s.ramTotalBytes)) GB  (\(Int(s.ramPercent))%)",
+                        percent: s.ramPercent, warnAt: 60, critAt: 80
+                    )
+                    if s.swapTotalBytes > 0 {
+                        swapRow(s)
+                    }
+                }
                 MetricBar(
                     label: "Storage",
                     valueText: "\(Fmt.gb(s.diskUsedBytes)) / \(Fmt.gb(s.diskTotalBytes)) GB  ·  \(Fmt.gb(s.diskFreeBytes)) free",
@@ -72,17 +87,8 @@ struct OverviewView: View {
             } label: {
                 Text("All processes").font(.caption.weight(.medium))
             }
-            .confirmationDialog(
-                "End \(killTarget?.name ?? "process")?",
-                isPresented: Binding(get: { killTarget != nil }, set: { if !$0 { killTarget = nil } }),
-                presenting: killTarget
-            ) { proc in
-                Button(forceKill ? "Force Quit" : "Quit", role: .destructive) {
-                    state.endProcess(proc, force: forceKill)
-                    killTarget = nil
-                }
-                Button("Cancel", role: .cancel) { killTarget = nil }
-            }
+
+            spikesSection
 
             Divider()
 
@@ -105,6 +111,78 @@ struct OverviewView: View {
             }
         }
         .padding(12)
+    }
+
+    /// Swap line under the Memory bar. A little swap is normal; sustained GBs is the
+    /// real "memory pressure" signal that the Memory % alone hides. Colour tracks level.
+    private func swapRow(_ s: SystemSnapshot) -> some View {
+        let level = Fmt.swapLevel(usedGB: s.swapUsedGB)
+        let color: Color = level == .heavy ? .red : (level == .elevated ? .orange : .secondary)
+        let note = level == .heavy ? "heavy paging" : (level == .elevated ? "some paging" : "healthy")
+        return HStack(spacing: 5) {
+            Image(systemName: "arrow.left.arrow.right.circle").font(.caption2)
+            Text("Swap \(Fmt.gb(s.swapUsedBytes)) / \(Fmt.gb(s.swapTotalBytes)) GB")
+                .font(.caption2.monospacedDigit())
+            Spacer()
+            Text(note).font(.caption2)
+        }
+        .foregroundColor(color)
+    }
+
+    /// Recent CPU spikes (threshold crossings), each with the top processes captured
+    /// at that moment and a quit action per process. Hidden until a spike is captured.
+    @ViewBuilder
+    private var spikesSection: some View {
+        let spikes = state.cpuHistory.recentSpikes
+        if !spikes.isEmpty {
+            Divider()
+            SectionHeader(title: "Recent CPU spikes")
+            ForEach(Array(spikes.prefix(3))) { spike in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bolt.fill")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                            .frame(width: 14)
+                        Text(String(format: "%.0f%% CPU", spike.cpuPercent))
+                            .font(.caption.weight(.medium).monospacedDigit())
+                        Spacer()
+                        Text(Fmt.ago(spike.date))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    ForEach(Array(spike.processes.prefix(5))) { proc in
+                        spikeProcessRow(proc)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    /// One process inside a spike: name, its CPU%, and a quit menu that reuses the
+    /// shared kill confirmation. Note: a process from an older spike may have exited
+    /// (handled gracefully), so the action is most meaningful on the latest spike.
+    private func spikeProcessRow(_ proc: ProcessItem) -> some View {
+        HStack(spacing: 8) {
+            Text(proc.name)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer()
+            Text(String(format: "%.0f%%", proc.cpuPercent))
+                .font(.caption2.monospacedDigit())
+                .foregroundColor(.secondary)
+            Menu {
+                Button("Quit") { state.endProcess(proc, force: false) }
+                Button("Force Quit", role: .destructive) { state.endProcess(proc, force: true) }
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 22)
+        }
+        .padding(.leading, 20)
     }
 
     @ViewBuilder
@@ -144,8 +222,8 @@ struct OverviewView: View {
             Text(String(format: "%.0f%%", sortByCPU ? proc.cpuPercent : proc.memPercent))
                 .font(.caption.monospacedDigit()).foregroundColor(.secondary)
             Menu {
-                Button("Quit") { forceKill = false; killTarget = proc }
-                Button("Force Quit", role: .destructive) { forceKill = true; killTarget = proc }
+                Button("Quit") { state.endProcess(proc, force: false) }
+                Button("Force Quit", role: .destructive) { state.endProcess(proc, force: true) }
             } label: {
                 Image(systemName: "xmark.circle")
             }

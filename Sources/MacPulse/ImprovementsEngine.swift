@@ -19,6 +19,7 @@ struct Improvement: Identifiable, Equatable {
 struct ImprovementContext {
     var cpuPercent: Double?
     var ramPercent: Double?
+    var swapUsedGB: Double?
     var diskPercent: Double?
     var diskFreeGB: Double?
     var uptimeDays: Double?
@@ -97,6 +98,24 @@ enum ImprovementsEngine {
                 title: "RAM usage at \(Int(ram))%",
                 detail: detail
             ))
+        }
+
+        // --- Swap / memory pressure ---
+        if let swap = ctx.swapUsedGB {
+            let level = Fmt.swapLevel(usedGB: swap)
+            if level != .ok {
+                var detail = "macOS is paging memory to disk, which slows everything down. Close apps you are not using (browsers with many tabs are the usual cause) to relieve pressure."
+                if let name = ctx.topRAMProcessName, let pct = ctx.topRAMProcessPct {
+                    detail += " Biggest consumer: \(name) (\(String(format: "%.1f", pct))%)."
+                }
+                items.append(Improvement(
+                    id: "swap",
+                    severity: level == .heavy ? .warning : .info,
+                    icon: "arrow.left.arrow.right.circle",
+                    title: "Swap in use: \(String(format: "%.1f", swap)) GB",
+                    detail: detail
+                ))
+            }
         }
 
         // --- CPU ---

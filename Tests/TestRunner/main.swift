@@ -380,6 +380,21 @@ do {
 
 do {
     var ctx = healthyContext()
+    ctx.swapUsedGB = 0.3
+    expect(!ImprovementsEngine.evaluate(ctx).contains { $0.id == "swap" }, "light swap is not flagged")
+    ctx.swapUsedGB = 1.5
+    let elevated = ImprovementsEngine.evaluate(ctx).first { $0.id == "swap" }
+    expectEq(elevated?.severity, .info, "elevated swap is info")
+    ctx.swapUsedGB = 5.0
+    ctx.topRAMProcessName = "Brave"
+    ctx.topRAMProcessPct = 9.1
+    let heavy = ImprovementsEngine.evaluate(ctx).first { $0.id == "swap" }
+    expectEq(heavy?.severity, .warning, "heavy swap is a warning")
+    expect(heavy?.detail.contains("Brave") == true, "swap finding names the biggest consumer")
+}
+
+do {
+    var ctx = healthyContext()
     ctx.uptimeDays = 21
     let items = ImprovementsEngine.evaluate(ctx)
     expectEq(items.count, 1, "long uptime is the only finding")
@@ -413,6 +428,11 @@ expectEq(Fmt.uptime(125 * 60), "2h 5m", "uptime hours+minutes")
 
 expectEq(Fmt.sampleInterval(onBattery: false), 5, "AC power samples every 5s")
 expectEq(Fmt.sampleInterval(onBattery: true), 12, "battery stretches the sample interval")
+
+expectEq(Fmt.swapLevel(usedGB: 0.4), .ok, "a little swap is healthy")
+expectEq(Fmt.swapLevel(usedGB: 1.0), .elevated, "1 GB swap is elevated")
+expectEq(Fmt.swapLevel(usedGB: 2.9), .elevated, "under 3 GB stays elevated")
+expectEq(Fmt.swapLevel(usedGB: 3.0), .heavy, "3 GB+ swap is heavy paging")
 
 expectEq(Fmt.menuBarMetrics(cpuPercent: 8, ramPercent: 61, diskPercent: 85,
                             showCPU: true, showRAM: true, showDisk: true),
@@ -500,6 +520,50 @@ do {
     expectEq(a.last30.messages, 3, "30-day window")
     expectEq(a.allTime.toolCalls, 3, "all-time tool calls summed")
     expectEq(a.projects.first?.name ?? "", "MacPulse", "projects sorted by messages desc")
+}
+
+// MARK: - CPUHistory
+
+print("CPUHistory")
+
+do {
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+    var h = CPUHistory(window: 60, spikeThreshold: 80, spikeCooldown: 30, maxSpikes: 3)
+
+    // Sampling + windowing
+    h.addSample(percent: 10, at: t0)
+    h.addSample(percent: 20, at: t0.addingTimeInterval(30))
+    h.addSample(percent: 95, at: t0.addingTimeInterval(61))   // t0 (age 61s) now outside 60s window
+    expectEq(h.samples.count, 2, "samples older than window are dropped")
+    expectEq(h.samples.first?.percent ?? 0, 20, "oldest retained sample is the 20% one")
+    expectEq(h.peakPercent, 95, "peak reflects retained window")
+}
+
+do {
+    let t0 = Date(timeIntervalSince1970: 2_000_000)
+    var h = CPUHistory(window: 900, spikeThreshold: 80, spikeCooldown: 30, maxSpikes: 3)
+
+    // Threshold gating
+    expect(!h.shouldCaptureSpike(percent: 79.9, at: t0), "below threshold does not capture")
+    expect(h.shouldCaptureSpike(percent: 80, at: t0), "at threshold captures when never fired")
+
+    h.recordSpike(SpikeEvent(date: t0, cpuPercent: 90,
+                             processes: [ProcessItem(pid: 1, name: "node", cpuPercent: 88, memPercent: 0)]))
+    expect(!h.shouldCaptureSpike(percent: 95, at: t0.addingTimeInterval(10)), "within cooldown suppresses capture")
+    expect(h.shouldCaptureSpike(percent: 95, at: t0.addingTimeInterval(30)), "cooldown elapsed re-arms capture")
+    expectEq(h.lastSpikeCaptureAt, t0, "cooldown clock tracks last capture")
+}
+
+do {
+    let t0 = Date(timeIntervalSince1970: 3_000_000)
+    var h = CPUHistory(window: 900, spikeThreshold: 80, spikeCooldown: 0, maxSpikes: 2)
+    for i in 0..<4 {
+        h.recordSpike(SpikeEvent(date: t0.addingTimeInterval(Double(i)), cpuPercent: 90,
+                                 processes: [ProcessItem(pid: Int32(i), name: "p\(i)", cpuPercent: 90, memPercent: 0)]))
+    }
+    expectEq(h.spikes.count, 2, "spike buffer capped at maxSpikes")
+    expectEq(h.recentSpikes.first?.topProcess?.name ?? "", "p3", "recentSpikes is newest-first")
+    expectEq(h.spikes.first?.topProcess?.name ?? "", "p2", "oldest spikes evicted first")
 }
 
 // MARK: - Summary

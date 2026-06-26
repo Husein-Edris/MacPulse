@@ -6,6 +6,13 @@ struct MenuMetric: Equatable {
     let value: String
 }
 
+/// How hard macOS is leaning on swap (paging memory to disk). Drives both the
+/// Memory-row colour and the Tips rule, so the thresholds live in one place.
+enum SwapLevel: Int, Comparable {
+    case ok = 0, elevated = 1, heavy = 2
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
 enum Fmt {
     static func gb(_ bytes: UInt64) -> String {
         String(format: "%.1f", Double(bytes) / 1_073_741_824)
@@ -38,6 +45,14 @@ enum Fmt {
     /// Menu-bar sample cadence. Stretched on battery to cut idle wakeups.
     static func sampleInterval(onBattery: Bool) -> TimeInterval {
         onBattery ? 12 : 5
+    }
+
+    /// Classifies swap usage. A little swap is normal; sustained GBs of paging is
+    /// the real signal that 16 GB is overcommitted and things will feel slow.
+    static func swapLevel(usedGB: Double) -> SwapLevel {
+        if usedGB >= 3 { return .heavy }
+        if usedGB >= 1 { return .elevated }
+        return .ok
     }
 
     static func ago(_ date: Date) -> String {

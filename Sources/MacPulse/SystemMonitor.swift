@@ -9,6 +9,8 @@ struct SystemSnapshot {
     let load15: Double
     let ramUsedBytes: UInt64
     let ramTotalBytes: UInt64
+    let swapUsedBytes: UInt64
+    let swapTotalBytes: UInt64
     let diskUsedBytes: Int64
     let diskTotalBytes: Int64
     let diskFreeBytes: Int64
@@ -18,6 +20,7 @@ struct SystemSnapshot {
     var ramPercent: Double {
         ramTotalBytes == 0 ? 0 : Double(ramUsedBytes) / Double(ramTotalBytes) * 100
     }
+    var swapUsedGB: Double { Double(swapUsedBytes) / 1_073_741_824 }
     var diskPercent: Double {
         diskTotalBytes == 0 ? 0 : Double(diskUsedBytes) / Double(diskTotalBytes) * 100
     }
@@ -42,6 +45,7 @@ final class SystemMonitor {
     func sample() -> SystemSnapshot {
         let cpu = sampleCPUPercent()
         let (ramUsed, ramTotal) = sampleRAM()
+        let (swapUsed, swapTotal) = sampleSwap()
         let (diskUsed, diskTotal, diskFree) = sampleDisk()
         var loads = [Double](repeating: 0, count: 3)
         getloadavg(&loads, 3)
@@ -52,6 +56,8 @@ final class SystemMonitor {
             load1: loads[0], load5: loads[1], load15: loads[2],
             ramUsedBytes: ramUsed,
             ramTotalBytes: ramTotal,
+            swapUsedBytes: swapUsed,
+            swapTotalBytes: swapTotal,
             diskUsedBytes: diskUsed,
             diskTotalBytes: diskTotal,
             diskFreeBytes: diskFree,
@@ -138,6 +144,18 @@ final class SystemMonitor {
         let appPages = UInt64(stats.internal_page_count) &- UInt64(stats.purgeable_count)
         let usedPages = appPages &+ UInt64(stats.wire_count) &+ UInt64(stats.compressor_page_count)
         return (usedPages &* UInt64(pageSize), total)
+    }
+
+    // MARK: - Swap
+
+    /// Reads swap usage straight from the kernel (`vm.swapusage`). macOS grows the
+    /// swap file dynamically, so `total` is whatever it has provisioned right now;
+    /// `used` is the diagnostic number (active paging to disk = memory pressure).
+    private func sampleSwap() -> (used: UInt64, total: UInt64) {
+        var usage = xsw_usage()
+        var size = MemoryLayout<xsw_usage>.stride
+        guard sysctlbyname("vm.swapusage", &usage, &size, nil, 0) == 0 else { return (0, 0) }
+        return (usage.xsu_used, usage.xsu_total)
     }
 
     // MARK: - Disk

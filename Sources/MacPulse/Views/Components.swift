@@ -49,6 +49,54 @@ struct MetricBar: View {
     }
 }
 
+/// Compact CPU% sparkline (area + line) over the retained history window.
+/// Plots samples evenly spaced; colour tracks the window's peak so a recent
+/// spike tints the whole trace. Drawn with `Path`, no per-point views.
+struct Sparkline: View {
+    let samples: [CPUSample]
+    var warnAt: Double = 50
+    var critAt: Double = 80
+
+    private var peak: Double { samples.map(\.percent).max() ?? 0 }
+    private var color: Color {
+        if peak >= critAt { return .red }
+        if peak >= warnAt { return .orange }
+        return .green
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let n = samples.count
+            if n >= 2 {
+                let stepX = w / CGFloat(n - 1)
+                let point: (Int, CPUSample) -> CGPoint = { i, s in
+                    CGPoint(x: CGFloat(i) * stepX,
+                            y: h - CGFloat(min(s.percent, 100) / 100) * h)
+                }
+                ZStack {
+                    Path { p in
+                        p.move(to: CGPoint(x: 0, y: h))
+                        for (i, s) in samples.enumerated() { p.addLine(to: point(i, s)) }
+                        p.addLine(to: CGPoint(x: w, y: h))
+                        p.closeSubpath()
+                    }
+                    .fill(color.opacity(0.15))
+
+                    Path { p in
+                        for (i, s) in samples.enumerated() {
+                            let pt = point(i, s)
+                            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+                        }
+                    }
+                    .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+                }
+            }
+        }
+    }
+}
+
 struct StatusDotRow: View {
     let name: String
     let isOn: Bool?
