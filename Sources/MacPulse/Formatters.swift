@@ -22,6 +22,15 @@ enum Fmt {
         String(format: "%.1f", Double(bytes) / 1_073_741_824)
     }
 
+    /// Human-readable memory size: MB below 1 GB, GB above (e.g. "390 MB", "1.2 GB").
+    static func memSize(_ bytes: UInt64) -> String {
+        let mb = Double(bytes) / 1_048_576
+        if mb < 1024 {
+            return "\(Int(mb.rounded())) MB"
+        }
+        return String(format: "%.1f GB", mb / 1024)
+    }
+
     static func uptime(_ seconds: TimeInterval) -> String {
         let days = Int(seconds) / 86_400
         let hours = (Int(seconds) % 86_400) / 3_600

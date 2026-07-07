@@ -289,17 +289,18 @@ print("ProcessParser")
 do {
     let out = """
       PID %CPU %MEM COMM
-     1234 12.5  3.2 Google Chrome Helper
-       42  0.0  0.1 launchd
+     1234 12.5  3.2 /Applications/cmux.app/Contents/MacOS/cmux
+       42  0.0  0.1 tar
      garbage line here
         0  9.9  9.9 kernel_task
     """
     let items = ProcessParser.parse(out)
     expectEq(items.count, 2, "parses two valid rows")
     expectEq(items[0].pid, 1234, "first pid parsed")
-    expectEq(items[0].name, "Google Chrome Helper", "comm keeps internal spaces")
+    expectEq(items[0].name, "cmux", "name resolved to friendly app name")
+    expectEq(items[0].rawName, "/Applications/cmux.app/Contents/MacOS/cmux", "raw path retained")
     expectEq(items[0].cpuPercent, 12.5, "cpu parsed")
-    expectEq(items[1].name, "launchd", "second row name parsed")
+    expectEq(items[1].name, "tar", "second row name parsed")
     expectEq(items[1].memPercent, 0.1, "mem parsed")
 }
 
@@ -311,6 +312,51 @@ do { // malformed rows are skipped for distinct reasons
     expectEq(ProcessParser.parse("h\n  garbage line here").count, 0, "row with fewer than 4 columns skipped")
     expectEq(ProcessParser.parse("h\n   0  9.9  9.9 kernel_task").count, 0, "pid 0 (kernel_task) skipped")
     expectEq(ProcessParser.parse("h\n  x  1.0  1.0 name").count, 0, "non-numeric pid skipped")
+}
+
+// MARK: - ProcessNamer
+
+print("ProcessNamer")
+
+do { // real app path resolves to the outermost .app name
+    let l = ProcessNamer.label(for: "/Applications/cmux.app/Contents/MacOS/cmux")
+    expectEq(l.name, "cmux", "app bundle name from path")
+    expectEq(l.safety, ProcessSafety.safe, "user app is safe to quit")
+}
+
+do { // nested helper/renderer collapses to the parent app + a hint
+    let raw = "/Applications/Brave Browser.app/Contents/Frameworks/Brave Browser Framework.framework/Versions/1/Helpers/Brave Browser Helper (Renderer).app/Contents/MacOS/Brave Browser Helper (Renderer)"
+    let l = ProcessNamer.label(for: raw)
+    expectEq(l.name, "Brave Browser", "outermost .app wins over nested helper .app")
+    expectEq(l.detail, "a browser tab", "renderer helper detail")
+    expectEq(l.safety, ProcessSafety.safe, "browser tab is safe to quit")
+}
+
+do { // known daemon by basename hits the dictionary
+    let l = ProcessNamer.label(for: "/System/Library/CoreServices/WindowServer")
+    expectEq(l.name, "macOS display engine", "WindowServer friendly name")
+    expectEq(l.safety, ProcessSafety.system, "WindowServer is a system process")
+}
+
+do { // Spotlight indexing family
+    expectEq(ProcessNamer.label(for: "/usr/libexec/mds_stores").name, "Spotlight indexing", "mds_stores friendly name")
+    expectEq(ProcessNamer.label(for: "mdworker_shared").name, "Spotlight indexing", "mdworker friendly name")
+}
+
+do { // WebKit content process has no user .app, resolved by reverse-DNS id
+    let l = ProcessNamer.label(for: "com.apple.WebKit.WebContent")
+    expectEq(l.name, "Safari web page", "WebKit content friendly name")
+    expectEq(l.detail, "a browser tab", "WebKit content detail")
+}
+
+do { // unknown reverse-DNS id falls back to a cleaned basename
+    let l = ProcessNamer.label(for: "com.apple.somethingunknownd")
+    expectEq(l.name, "somethingunknownd", "strips com.apple. prefix on fallback")
+    expectEq(l.safety, ProcessSafety.caution, "unknown process is caution")
+}
+
+do { // bare short name with no path is kept as-is
+    expectEq(ProcessNamer.label(for: "tar").name, "tar", "bare basename kept")
 }
 
 // MARK: - LargeFileRanker
@@ -423,6 +469,12 @@ do {
 print("Fmt")
 
 expectEq(Fmt.gb(UInt64(16 * 1_073_741_824)), "16.0", "bytes to GB")
+
+expectEq(Fmt.memSize(408_944_640), "390 MB", "sub-GB shows as rounded MB")
+expectEq(Fmt.memSize(0), "0 MB", "zero bytes shows as 0 MB")
+expectEq(Fmt.memSize(1_073_741_824), "1.0 GB", "exactly 1 GB is not treated as sub-GB")
+expectEq(Fmt.memSize(1_610_612_736), "1.5 GB", "1.5 GB shown with one decimal")
+
 expectEq(Fmt.uptime(86_400 * 13 + 3_600 * 4), "13d 4h", "uptime days+hours")
 expectEq(Fmt.uptime(125 * 60), "2h 5m", "uptime hours+minutes")
 
@@ -564,6 +616,20 @@ do {
     expectEq(h.spikes.count, 2, "spike buffer capped at maxSpikes")
     expectEq(h.recentSpikes.first?.topProcess?.name ?? "", "p3", "recentSpikes is newest-first")
     expectEq(h.spikes.first?.topProcess?.name ?? "", "p2", "oldest spikes evicted first")
+}
+
+// MARK: - EventLog
+
+print("EventLog")
+
+do {
+    // A fixed instant: 2026-07-07 12:55:04 UTC. formatLine renders in UTC so the
+    // test is timezone-stable.
+    let date = Date(timeIntervalSince1970: 1_783_428_904)
+    let cpu = EventLog.formatLine(kind: .cpu, percent: 87, name: "node", at: date)
+    expectEq(cpu, "2026-07-07 12:55:04  CPU 87%  node", "cpu line format")
+    let mem = EventLog.formatLine(kind: .mem, percent: 76, name: "Safari web page", at: date)
+    expectEq(mem, "2026-07-07 12:55:04  MEM 76%  Safari web page", "mem line format")
 }
 
 // MARK: - Summary
