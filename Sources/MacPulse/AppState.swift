@@ -65,6 +65,9 @@ final class AppState: ObservableObject {
     private var isPopoverOpen = false
     private var isSampling = false
     private var isCapturingSpike = false
+    private var lastMemoryEventAt: Date?
+    private static let memoryEventThreshold = 85.0   // percent of RAM
+    private static let memoryEventCooldown: TimeInterval = 300   // 5 minutes
     private var onBattery = PowerSource.onBattery
     private static let processInterval: TimeInterval = 5
     private var isApplyingLoginItem = false
@@ -155,6 +158,7 @@ final class AppState: ObservableObject {
                 self.cpuHistory.addSample(percent: snapshot.cpuPercent, at: snapshot.date)
                 self.isSampling = false
                 self.maybeCaptureSpike(snapshot)
+                self.maybeLogMemoryEvent(snapshot)
             }
         }
     }
@@ -179,8 +183,31 @@ final class AppState: ObservableObject {
                     cpuPercent: cpu,
                     processes: procs.topCPU
                 ))
+                if let top = procs.topCPU.first {
+                    EventLog.append(kind: .cpu, percent: Int(cpu.rounded()),
+                                    name: top.name, at: date)
+                }
                 self.isCapturingSpike = false
             }
+        }
+    }
+
+    /// When RAM usage is high (and the cooldown has elapsed), record one memory
+    /// event naming the current top-RAM process. Uses the already-sampled process
+    /// list when the popover is open; otherwise runs one bounded `ps` scan.
+    private func maybeLogMemoryEvent(_ snapshot: SystemSnapshot) {
+        guard snapshot.ramPercent >= Self.memoryEventThreshold else { return }
+        if let last = lastMemoryEventAt,
+           snapshot.date.timeIntervalSince(last) < Self.memoryEventCooldown { return }
+        lastMemoryEventAt = snapshot.date
+        let monitor = self.monitor
+        let date = snapshot.date
+        let pct = Int(snapshot.ramPercent.rounded())
+        let cached = processes.topRAM.first
+        Task.detached(priority: .utility) {
+            let name = cached?.name ?? monitor.sampleProcesses(top: 1).topRAM.first?.name
+            guard let name else { return }
+            EventLog.append(kind: .mem, percent: pct, name: name, at: date)
         }
     }
 
@@ -222,6 +249,14 @@ final class AppState: ObservableObject {
     func openInActivityMonitor(_ item: ProcessItem) {
         let url = URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")
         NSWorkspace.shared.open(url)
+    }
+
+    var eventLogExists: Bool { EventLog.fileExists }
+
+    /// Opens the event log in the user's default handler (Console.app / TextEdit).
+    func openEventLog() {
+        guard EventLog.fileExists else { return }
+        NSWorkspace.shared.open(EventLog.fileURL)
     }
 
     /// True when Reveal in Finder can act on this process (it has a real file path).

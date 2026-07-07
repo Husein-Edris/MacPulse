@@ -90,24 +90,38 @@ struct OverviewView: View {
 
             spikesSection
 
-            Divider()
+            Group {
+                Divider()
 
-            SectionHeader(title: "Security")
-            if let sec = state.security {
-                HStack(spacing: 16) {
-                    VStack(spacing: 5) {
-                        StatusDotRow(name: "Firewall", isOn: sec.firewall)
-                        StatusDotRow(name: "FileVault", isOn: sec.fileVault)
+                SectionHeader(title: "Security")
+                if let sec = state.security {
+                    HStack(spacing: 16) {
+                        VStack(spacing: 5) {
+                            StatusDotRow(name: "Firewall", isOn: sec.firewall)
+                            StatusDotRow(name: "FileVault", isOn: sec.fileVault)
+                        }
+                        VStack(spacing: 5) {
+                            StatusDotRow(name: "SIP", isOn: sec.sip)
+                            StatusDotRow(name: "Gatekeeper", isOn: sec.gatekeeper)
+                        }
                     }
-                    VStack(spacing: 5) {
-                        StatusDotRow(name: "SIP", isOn: sec.sip)
-                        StatusDotRow(name: "Gatekeeper", isOn: sec.gatekeeper)
-                    }
+                } else {
+                    Text("Checking…")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
-            } else {
-                Text("Checking…")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+
+                Divider()
+
+                Button {
+                    state.openEventLog()
+                } label: {
+                    Label("Open log file", systemImage: "doc.text")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!state.eventLogExists)
+                .help("Open MacPulse's high CPU / memory event log")
             }
         }
         .padding(12)
