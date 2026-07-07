@@ -177,16 +177,16 @@ final class AppState: ObservableObject {
         let cpu = snapshot.cpuPercent
         Task.detached(priority: .utility) {
             let procs = monitor.sampleProcesses(top: 5)
+            if let top = procs.topCPU.first {
+                EventLog.append(kind: .cpu, percent: Int(cpu.rounded()),
+                                name: top.name, at: date)
+            }
             await MainActor.run {
                 self.cpuHistory.recordSpike(SpikeEvent(
                     date: date,
                     cpuPercent: cpu,
                     processes: procs.topCPU
                 ))
-                if let top = procs.topCPU.first {
-                    EventLog.append(kind: .cpu, percent: Int(cpu.rounded()),
-                                    name: top.name, at: date)
-                }
                 self.isCapturingSpike = false
             }
         }

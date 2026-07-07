@@ -469,6 +469,12 @@ do {
 print("Fmt")
 
 expectEq(Fmt.gb(UInt64(16 * 1_073_741_824)), "16.0", "bytes to GB")
+
+expectEq(Fmt.memSize(408_944_640), "390 MB", "sub-GB shows as rounded MB")
+expectEq(Fmt.memSize(0), "0 MB", "zero bytes shows as 0 MB")
+expectEq(Fmt.memSize(1_073_741_824), "1.0 GB", "exactly 1 GB is not treated as sub-GB")
+expectEq(Fmt.memSize(1_610_612_736), "1.5 GB", "1.5 GB shown with one decimal")
+
 expectEq(Fmt.uptime(86_400 * 13 + 3_600 * 4), "13d 4h", "uptime days+hours")
 expectEq(Fmt.uptime(125 * 60), "2h 5m", "uptime hours+minutes")
 

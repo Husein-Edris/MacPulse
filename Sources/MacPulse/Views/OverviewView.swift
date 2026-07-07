@@ -238,7 +238,7 @@ struct OverviewView: View {
             return String(format: "%.1f%%", p.memPercent)
         }
         let bytes = UInt64(Double(total) * p.memPercent / 100.0)
-        return "\(Fmt.gb(bytes)) GB"
+        return Fmt.memSize(bytes)
     }
 
     /// Plain-language "is it safe to quit" hint and its colour.

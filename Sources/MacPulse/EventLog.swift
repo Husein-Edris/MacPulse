@@ -23,6 +23,7 @@ enum EventLog {
     }
 
     private static let maxLines = 2000
+    private static let writeQueue = DispatchQueue(label: "com.macpulse.eventlog")
 
     private static let formatter: DateFormatter = {
         let f = DateFormatter()
@@ -40,19 +41,21 @@ enum EventLog {
     /// Best-effort append of one event line, then trim to the last `maxLines`.
     /// Silently no-ops on any I-O error (logs to stderr for debugging).
     static func append(kind: EventKind, percent: Int, name: String, at date: Date) {
-        let line = formatLine(kind: kind, percent: percent, name: name, at: date)
-        let fm = FileManager.default
-        do {
-            try fm.createDirectory(at: fileURL.deletingLastPathComponent(),
-                                   withIntermediateDirectories: true)
-            let existing = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
-            var lines = existing.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            if lines.last == "" { lines.removeLast() }   // drop trailing empty from the final newline
-            lines.append(line)
-            if lines.count > maxLines { lines.removeFirst(lines.count - maxLines) }
-            try (lines.joined(separator: "\n") + "\n").write(to: fileURL, atomically: true, encoding: .utf8)
-        } catch {
-            FileHandle.standardError.write(Data("MacPulse: EventLog write failed: \(error)\n".utf8))
+        writeQueue.sync {
+            let line = formatLine(kind: kind, percent: percent, name: name, at: date)
+            let fm = FileManager.default
+            do {
+                try fm.createDirectory(at: fileURL.deletingLastPathComponent(),
+                                       withIntermediateDirectories: true)
+                let existing = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+                var lines = existing.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                if lines.last == "" { lines.removeLast() }   // drop trailing empty from the final newline
+                lines.append(line)
+                if lines.count > maxLines { lines.removeFirst(lines.count - maxLines) }
+                try (lines.joined(separator: "\n") + "\n").write(to: fileURL, atomically: true, encoding: .utf8)
+            } catch {
+                FileHandle.standardError.write(Data("MacPulse: EventLog write failed: \(error)\n".utf8))
+            }
         }
     }
 }
