@@ -612,6 +612,20 @@ do {
     expectEq(h.spikes.first?.topProcess?.name ?? "", "p2", "oldest spikes evicted first")
 }
 
+// MARK: - EventLog
+
+print("EventLog")
+
+do {
+    // A fixed instant: 2026-07-07 12:55:04 UTC. formatLine renders in UTC so the
+    // test is timezone-stable.
+    let date = Date(timeIntervalSince1970: 1_783_428_904)
+    let cpu = EventLog.formatLine(kind: .cpu, percent: 87, name: "node", at: date)
+    expectEq(cpu, "2026-07-07 12:55:04  CPU 87%  node", "cpu line format")
+    let mem = EventLog.formatLine(kind: .mem, percent: 76, name: "Safari web page", at: date)
+    expectEq(mem, "2026-07-07 12:55:04  MEM 76%  Safari web page", "mem line format")
+}
+
 // MARK: - Summary
 
 print(String(repeating: "─", count: 40))
