@@ -64,11 +64,20 @@ publishes → SwiftUI views render. Views never call services directly.
 - **CPU % needs two tick samples** — `SystemMonitor` keeps `previousTicks` state and
   double-samples on first call. It is NOT safe to call `sample()` concurrently, so
   `refreshSystem()` is guarded by an `isSampling` flag to prevent overlapping runs.
-- **Process control is pure-parse + syscall.** `ProcessParser` (pure, tested) parses
-  `ps -Aceo pid,pcpu,pmem,comm -r` into `ProcessItem`s (now carrying `pid`).
-  `ProcessControl.terminate(pid:force:)` calls the `kill(2)` syscall directly
-  (SIGTERM, or SIGKILL when forced) and maps `EPERM` → a friendly `notPermitted`
-  failure — root-owned processes fail gracefully, never escalating to sudo.
+- **Process control is pure-parse + syscall.** `SystemMonitor.sampleProcesses` runs
+  `ps -Aeo pid,pcpu,pmem,comm -r -ww` (full executable paths, NOT `-c` short names);
+  the pure, tested `ProcessParser` parses it and calls the pure, tested `ProcessNamer`
+  to turn each raw path into a human-readable name plus a plain-language `detail` and a
+  `ProcessSafety` verdict (`ProcessItem` carries `name`/`rawName`/`detail`/`safety`/`pid`).
+  `ProcessControl.terminate(pid:force:)` calls the `kill(2)` syscall directly (SIGTERM,
+  or SIGKILL when forced) and maps `EPERM` to a friendly `notPermitted` failure so
+  root-owned processes fail gracefully, never escalating to sudo.
+- **Overview event log.** `EventLog` (pure tested `formatLine` + off-main, serialized
+  `append` under a `writeQueue`) records high-CPU/high-memory events to
+  `~/Library/Logs/MacPulse/events.log`; `AppState` writes on the CPU-spike path and a
+  high-memory path (RAM >= 85%, 5-min cooldown), and the Overview has an "Open log file"
+  button. Timestamps are UTC by design. `ProcessNamer` and `EventLog` are both in the
+  `scripts/test.sh` pure-logic list (only `EventLog.formatLine` is tested; `append` is I/O).
 - **Large-file scan is I/O walk + pure ranker.** `FileScanner.scanLargeFiles` walks the
   home folder (skipping `~/Library`, hidden dirs, and symlinks) for files ≥100 MB;
   the pure, tested `LargeFileRanker` sorts and caps the results. Keep the ranking logic
@@ -120,3 +129,7 @@ publishes → SwiftUI views render. Views never call services directly.
   (never a shell string — no injection surface).
 - `legacy/` holds the retired Bash dashboard this app replaced. Don't touch it.
 - `logs/` is leftover data from the legacy scripts, gitignored.
+
+<!-- handover:status -->
+**Current status:** Practical Overview (friendly process names, safe-quit hints + Reveal/Activity actions, MB/GB sizes, CPU/memory event log) shipped and pushed to origin/main (merge 741a45b). **Next:** see HANDOVER.md.
+<!-- /handover:status -->
