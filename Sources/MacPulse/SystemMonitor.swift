@@ -68,7 +68,7 @@ final class SystemMonitor {
 
     /// Blocking; one `ps` invocation, parsed and sorted in-process.
     func sampleProcesses(top n: Int = 10) -> ProcessSnapshot {
-        guard let output = Shell.run("/bin/ps", ["-Aceo", "pid,pcpu,pmem,comm", "-r"]) else {
+        guard let output = Shell.run("/bin/ps", ["-Aeo", "pid,pcpu,pmem,comm", "-r", "-ww"]) else {
             return ProcessSnapshot(topCPU: [], topRAM: [])
         }
         let items = ProcessParser.parse(output)
