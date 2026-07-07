@@ -16,6 +16,7 @@ swiftc -O \
     Sources/MacPulse/Formatters.swift \
     Sources/MacPulse/ClaudeUsageParser.swift \
     Sources/MacPulse/CPUHistory.swift \
+    Sources/MacPulse/ProcessNamer.swift \
     Tests/TestRunner/main.swift \
     -o .build/testrunner
 
