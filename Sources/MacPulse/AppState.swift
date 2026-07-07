@@ -212,6 +212,23 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Reveals the process's executable in Finder. No-op when the raw name is not a real path.
+    func revealInFinder(_ item: ProcessItem) {
+        guard canReveal(item) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.rawName)])
+    }
+
+    /// Opens Activity Monitor so the user can inspect the process there.
+    func openInActivityMonitor(_ item: ProcessItem) {
+        let url = URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")
+        NSWorkspace.shared.open(url)
+    }
+
+    /// True when Reveal in Finder can act on this process (it has a real file path).
+    func canReveal(_ item: ProcessItem) -> Bool {
+        item.rawName.hasPrefix("/") && FileManager.default.fileExists(atPath: item.rawName)
+    }
+
     func refreshSecurity(force: Bool = false) {
         if !force,
            let current = security,

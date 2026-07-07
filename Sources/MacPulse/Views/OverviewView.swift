@@ -176,6 +176,10 @@ struct OverviewView: View {
             Menu {
                 Button("Quit") { state.endProcess(proc, force: false) }
                 Button("Force Quit", role: .destructive) { state.endProcess(proc, force: true) }
+                Divider()
+                Button("Reveal in Finder") { state.revealInFinder(proc) }
+                    .disabled(!state.canReveal(proc))
+                Button("Open Activity Monitor") { state.openInActivityMonitor(proc) }
             } label: {
                 Image(systemName: "xmark.circle")
             }
@@ -203,7 +207,7 @@ struct OverviewView: View {
                         .truncationMode(.tail)
                     Text(isCPU
                          ? String(format: "%.0f%%", p.cpuPercent)
-                         : String(format: "%.1f%%", p.memPercent))
+                         : memSizeText(p))
                         .font(.caption.monospacedDigit())
                         .foregroundColor(.secondary)
                 }
@@ -212,11 +216,35 @@ struct OverviewView: View {
         }
     }
 
+    /// Approximate resident size for a process, from its RAM percentage and total RAM.
+    /// This is an estimate (percent of total), not exact RSS, but reads far better
+    /// than a bare percentage for a non-technical user.
+    private func memSizeText(_ p: ProcessItem) -> String {
+        guard let total = state.system?.ramTotalBytes, total > 0 else {
+            return String(format: "%.1f%%", p.memPercent)
+        }
+        let bytes = UInt64(Double(total) * p.memPercent / 100.0)
+        return "\(Fmt.gb(bytes)) GB"
+    }
+
+    /// Plain-language "is it safe to quit" hint and its colour.
+    private func safetyHint(_ item: ProcessItem) -> (text: String, color: Color) {
+        switch item.safety {
+        case .safe:    return ("Safe to close", .secondary)
+        case .caution: return ("Close only if you know it", .orange)
+        case .system:  return ("System process, leave running", .secondary)
+        }
+    }
+
     private func processRow(_ proc: ProcessItem) -> some View {
-        HStack(spacing: 8) {
+        let hint = safetyHint(proc)
+        return HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(proc.name).font(.caption).lineLimit(1)
-                Text("pid \(proc.pid)").font(.caption2.monospacedDigit()).foregroundColor(.secondary)
+                if let detail = proc.detail {
+                    Text(detail).font(.caption2).foregroundColor(.secondary).lineLimit(1)
+                }
+                Text(hint.text).font(.caption2).foregroundColor(hint.color).lineLimit(1)
             }
             Spacer()
             Text(String(format: "%.0f%%", sortByCPU ? proc.cpuPercent : proc.memPercent))
@@ -224,6 +252,10 @@ struct OverviewView: View {
             Menu {
                 Button("Quit") { state.endProcess(proc, force: false) }
                 Button("Force Quit", role: .destructive) { state.endProcess(proc, force: true) }
+                Divider()
+                Button("Reveal in Finder") { state.revealInFinder(proc) }
+                    .disabled(!state.canReveal(proc))
+                Button("Open Activity Monitor") { state.openInActivityMonitor(proc) }
             } label: {
                 Image(systemName: "xmark.circle")
             }
